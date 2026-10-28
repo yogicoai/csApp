@@ -125,6 +125,9 @@ function escapeHtml(text: string) {
 }
 
 export const NOTICE_COLORS = { border: "#3cc4d6", title: "#2f3a45", text: "#333d47", banner: "#ff8a1f", highlight: "#139fb5" };
+// 홈페이지(yogibo.kr)가 쓰는 Pretendard — 홈페이지는 이미 불러와 두고 있어 팝업도 그대로 쓴다. 관리 화면 미리보기는 같은 CSS 를 불러온다.
+export const NOTICE_FONT = "Pretendard,'Apple SD Gothic Neo','Malgun Gothic',sans-serif";
+export const PRETENDARD_CSS_URL = "https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/pretendard.min.css";
 export const YOGIBO_LOGO_URL = "https://yogibo.kr/web/img/icon/logo3_on.png";
 
 // 상담원 헤드셋 + 말풍선 아이콘
@@ -160,7 +163,7 @@ export function noticeHtml(period: LeavePeriod, settings: LeaveNoticeSettings, q
     )
     .join("");
   return [
-    `<div style="box-sizing:border-box;width:100%;max-width:640px;margin:0 auto;border:6px solid ${c.border};background:#fff;padding:clamp(18px,5vw,30px) clamp(16px,5vw,34px) clamp(16px,4vw,24px);font-family:'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:${c.text};text-align:center;word-break:keep-all">`,
+    `<div style="box-sizing:border-box;width:100%;max-width:640px;margin:0 auto;border:6px solid ${c.border};background:#fff;padding:clamp(18px,5vw,30px) clamp(16px,5vw,34px) clamp(16px,4vw,24px);font-family:${NOTICE_FONT};color:${c.text};text-align:center;word-break:keep-all">`,
     `<div style="font-size:clamp(21px,6vw,28px);font-weight:800;color:${c.title};letter-spacing:-0.5px">${escapeHtml(settings.title)}</div>`,
     `<div style="width:clamp(64px,18vw,92px);height:clamp(64px,18vw,92px);margin:clamp(12px,3.5vw,18px) auto clamp(8px,2.5vw,12px)">${HEADSET_SVG.replace('width="96" height="96"', 'width="100%" height="100%"')}</div>`,
     `<div style="font-size:clamp(15px,4.3vw,18px);line-height:1.75">${body}</div>`,

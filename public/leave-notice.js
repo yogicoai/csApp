@@ -60,7 +60,7 @@
 
     var bar = document.createElement("div");
     bar.style.cssText =
-      "display:flex;border-top:1px solid #e5e9ee;font:500 14px/1 'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif";
+      "display:flex;border-top:1px solid #e5e9ee;font:500 14px/1 Pretendard,'Apple SD Gothic Neo','Malgun Gothic',sans-serif";
 
     function button(label, onClick) {
       var el = document.createElement("button");

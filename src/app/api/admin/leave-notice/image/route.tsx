@@ -4,18 +4,23 @@ import { bodyLines, HEADSET_SVG, NOTICE_COLORS, YOGIBO_LOGO_URL } from "@/lib/le
 import { findNoticePeriod, getNoticeSettings, noticeQrSvg } from "@/lib/leaveNoticeServer";
 
 // 휴무 팝업 이미지(PNG) — 톡톡·카카오 공지에 올릴 그림. ?id=<휴무 기간 id | sample(예시)>
-// 글꼴은 Google Fonts 의 Noto Sans KR 을 그 이미지에 쓰는 글자만 받아 쓴다(ImageResponse 는 woff2 를 못 읽어 ttf).
+// 글꼴은 홈페이지와 같은 Pretendard(OFL) — ImageResponse 는 woff2 를 못 읽어 woff 를 받고, 서버가 켜져 있는 동안 재사용한다.
 const WIDTH = 720;
+const PRETENDARD_WOFF = "https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/woff";
+let fontsPromise: Promise<[ArrayBuffer, ArrayBuffer]> | null = null;
 
-async function loadFont(weight: 400 | 800, text: string) {
-  const css = await fetch(
-    `https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@${weight}&text=${encodeURIComponent(text)}`,
-  ).then((response) => response.text());
-  const url = css.match(/src: url\((.+?)\) format\('(?:opentype|truetype)'\)/)?.[1];
-  if (!url) throw new Error("font css");
-  const response = await fetch(url);
-  if (!response.ok) throw new Error("font file");
+async function fetchFont(file: string) {
+  const response = await fetch(`${PRETENDARD_WOFF}/${file}`);
+  if (!response.ok) throw new Error(`font ${file} ${response.status}`);
   return response.arrayBuffer();
+}
+
+function loadFonts() {
+  fontsPromise ??= Promise.all([fetchFont("Pretendard-Regular.woff"), fetchFont("Pretendard-ExtraBold.woff")]).catch((error) => {
+    fontsPromise = null; // 실패하면 다음 요청에서 다시 받는다
+    throw error;
+  });
+  return fontsPromise;
 }
 
 async function dataUri(url: string) {
@@ -49,16 +54,15 @@ export async function GET(request: Request) {
   const lines = bodyLines(settings, period);
   const notes = settings.notes.map((note) => ({ ...note, text: note.text.trim() })).filter((note) => note.text);
   const resume = `${settings.resumePrefix} : ${period.resumeLabel}`;
-  const allText = [settings.title, ...lines.map((line) => line.before + line.date + line.after), resume, ...notes.map((n) => `※ ${n.text}`)].join("");
 
-  let assets: [ArrayBuffer, ArrayBuffer, string, string];
+  let assets: [[ArrayBuffer, ArrayBuffer], string, string];
   try {
-    assets = await Promise.all([loadFont(400, allText), loadFont(800, allText), dataUri(YOGIBO_LOGO_URL), noticeQrSvg(settings.qrUrl)]);
+    assets = await Promise.all([loadFonts(), dataUri(YOGIBO_LOGO_URL), noticeQrSvg(settings.qrUrl)]);
   } catch (error) {
     console.warn("[leave-notice] 이미지 재료(글꼴·QR) 받기 실패", error);
     return Response.json({ error: "이미지를 만들지 못했어요(글꼴을 받지 못했을 수 있어요). 잠시 후 다시 시도해 주세요." }, { status: 502 });
   }
-  const [regular, bold, logo, qrSvg] = assets;
+  const [[regular, bold], logo, qrSvg] = assets;
   const c = NOTICE_COLORS;
   const height = estimateHeight(
     lines.map((line) => line.before + line.date + line.after),
@@ -77,7 +81,7 @@ export async function GET(request: Request) {
             background: "#fff",
             border: `8px solid ${c.border}`,
             padding: "34px 40px 26px",
-            fontFamily: "Noto Sans KR",
+            fontFamily: "Pretendard",
             color: c.text,
             wordBreak: "keep-all",
           }}
@@ -139,8 +143,8 @@ export async function GET(request: Request) {
         width: WIDTH,
         height,
         fonts: [
-          { name: "Noto Sans KR", data: regular, weight: 400, style: "normal" },
-          { name: "Noto Sans KR", data: bold, weight: 800, style: "normal" },
+          { name: "Pretendard", data: regular, weight: 400, style: "normal" },
+          { name: "Pretendard", data: bold, weight: 800, style: "normal" },
         ],
         // 관리 화면 전용 그림이라 어디에도 저장해 두지 않는다(미리보기도 문구를 고치면 바로 바뀌게).
         headers: { "Content-Disposition": `attachment; filename="leave-notice-${period.start}.png"`, "Cache-Control": "private, no-store" },

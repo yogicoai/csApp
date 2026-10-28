@@ -3,7 +3,15 @@
 import { ChevronDown, Copy, Download, Loader2, Megaphone, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { CLOSURE_CHANGED_EVENT } from "@/components/LiveChat";
-import { DATE_TOKEN, LEAD_DAYS_MAX, type LeaveNoticeSettings, type LeavePeriod, NOTES_MAX } from "@/lib/leaveNotice";
+import {
+  DATE_TOKEN,
+  LEAD_DAYS_MAX,
+  type LeaveNoticeSettings,
+  type LeavePeriod,
+  NOTES_MAX,
+  NOTICE_FONT,
+  PRETENDARD_CSS_URL,
+} from "@/lib/leaveNotice";
 import { dayLabel } from "@/lib/liveChatHours";
 
 // 연차 관리 '홈페이지 휴무 팝업' — 지정한 휴무를 기간으로 묶어 cafe24 팝업으로 자동 노출하고(설치 코드 한 번),
@@ -46,7 +54,7 @@ const PREVIEW_MODES: Array<{ id: PreviewMode; label: string; caption: string }> 
 // 스크립트는 이 미리보기 틀(srcdoc) 안에서만 넘겨받은 내용을 바로 띄운다.
 const PREVIEW_SITE_CSS = [
   "*{box-sizing:border-box}",
-  "body{margin:0;background:#fff;font-family:'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif}",
+  `body{margin:0;background:#fff;font-family:${NOTICE_FONT}}`,
   "header{display:flex;align-items:center;justify-content:space-between;height:64px;padding:0 28px;border-bottom:1px solid #eef0f2}",
   "header b{font-size:22px;color:#2f3a45;letter-spacing:-.5px}",
   "nav{display:flex;gap:16px}nav i{width:56px;height:10px;border-radius:5px;background:#e3e7eb}",
@@ -61,7 +69,7 @@ const PREVIEW_SITE_HTML = `<header><b>yogibo</b><nav><i></i><i></i><i></i><i></i
 function popupPreviewDoc(origin: string, period: PeriodView) {
   // 내용은 글자로만 넘긴다(</script> 가 끼어들지 않게 < 를 이스케이프).
   const notice = JSON.stringify({ id: period.id, html: period.html }).replace(/</g, "\\u003c");
-  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${PREVIEW_SITE_CSS}</style></head><body>${PREVIEW_SITE_HTML}<script>window.__yogiboLeaveNoticePreview=${notice}</script><script src="${origin}/leave-notice.js"></script></body></html>`;
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="${PRETENDARD_CSS_URL}"><style>${PREVIEW_SITE_CSS}</style></head><body>${PREVIEW_SITE_HTML}<script>window.__yogiboLeaveNoticePreview=${notice}</script><script src="${origin}/leave-notice.js"></script></body></html>`;
 }
 
 // 미리보기 위 한 줄 — 언제 홈페이지에 뜨는지(예시면 예시라고)

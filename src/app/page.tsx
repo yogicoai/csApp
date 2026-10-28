@@ -19,7 +19,7 @@ export default function Home() {
         <h1>궁금한 내용을 먼저 골라보세요.</h1>
         <p>배송, 교환/환불, A/S 문의를 모바일에서 빠르게 확인하고 상담으로 이어갈 수 있습니다.</p>
         <div className="home-actions">
-          <Link href="/guide/ownmall">자사몰 가이드 보기</Link>
+          <Link href="/guide/ownmall">채팅봇 바로가기</Link>
           <Link href="/admin">어드민 보기</Link>
         </div>
       </section>
