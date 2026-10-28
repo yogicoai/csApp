@@ -10,7 +10,7 @@ export const maxDuration = 60;
 
 // 고객 조회 — ?phone=010-1234-5678 하나로 녹취·상담·게시판·주문·블랙컨슈머를 모은다(lib/customerLookup).
 //  기본은 이름·내용·회원 ID·송장을 가린 결과(조회 기록에 '고객 조회')이고, &detail=1([자세히 보기])이면 전체를 보낸다.
-//  자세히 보기는 기록('자세히 보기')을 남겨야만 보여 준다. 둘 다 처리하는 사람 이름(쿠키)이 있어야 한다.
+//  자세히 보기는 기록('자세히 보기')을 남겨야만 보여 준다. 번호만으로 조회하고, 누가 봤는지는 로그인 세션·접속 IP 로 남긴다.
 export async function GET(request: Request) {
   const denied = await requireAdmin();
   if (denied) return denied;
@@ -20,9 +20,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "전화번호를 확인해 주세요. (예: 010-1234-5678)" }, { status: 400 });
   }
   const context = await accessContext();
-  if (!context.operator) {
-    return NextResponse.json({ error: "조회하는 사람 이름을 먼저 적어 주세요.", needOperator: true }, { status: 400 });
-  }
   const detail = params.get("detail") === "1";
 
   let result;

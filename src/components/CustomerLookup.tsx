@@ -3,13 +3,12 @@
 import { ClipboardList, Eye, History, Loader2, MessageCircle, Mic, Phone, Search, ShieldAlert, Truck } from "lucide-react";
 import Link from "next/link";
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { shipmentStatusLabel } from "@/components/AssistPanel";
 import { reasonLabel } from "@/lib/blackConsumer";
 import type { OrderCandidate } from "@/lib/cafe24/service";
 import type { CustomerLookup as LookupResult, LookupSection } from "@/lib/customerLookup";
 import { outcomeLabel, TALK_PHOTO_PREFIX } from "@/lib/liveChatOptions";
-import { OPERATOR_MAX, readOperator, saveOperator } from "@/lib/operator";
 import { formatPhone, isPhoneDigits, phoneDigits } from "@/lib/phone";
 
 // 고객 조회 — 전화번호 하나로 녹취·실시간 상담(톡톡 포함)·홈페이지 게시판·주문·블랙컨슈머를 한 화면에 모은다.
@@ -89,19 +88,13 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
   const initialDigits = phoneDigits(initialPhone);
   const [input, setInput] = useState(isPhoneDigits(initialDigits) ? formatPhone(initialDigits) : initialPhone);
   const [phone, setPhone] = useState(isPhoneDigits(initialDigits) ? initialDigits : "");
-  const [operator, setOperator] = useState("");
-  const [operatorLoaded, setOperatorLoaded] = useState(false);
   const [data, setData] = useState<LookupResult | null>(null);
   const [loading, setLoading] = useState<"" | "lookup" | "detail">("");
   const [error, setError] = useState("");
   // 자세히 보기를 연 시각 — 조회 기록에 남았다는 안내에 쓴다
   const [revealedAt, setRevealedAt] = useState("");
-  const operatorRef = useRef<HTMLInputElement>(null);
 
   const lookup = useCallback(async (digits: string, detail: boolean) => {
-    // 처리하는 사람은 쿠키로 서버에 가므로 요청 직전에 기억해 둔 이름과 맞춘다.
-    const name = readOperator();
-    if (name) saveOperator(name);
     setLoading(detail ? "detail" : "lookup");
     setError("");
     try {
@@ -109,7 +102,6 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         setError(body.error ?? "고객 정보를 불러오지 못했어요.");
-        if (body.needOperator) operatorRef.current?.focus();
         if (!detail) setData(null);
         return;
       }
@@ -122,22 +114,11 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
     }
   }, []);
 
-  // 이 브라우저에 기억해 둔 '조회하는 사람'을 채운 뒤에 주소로 받은 번호를 조회한다.
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const name = readOperator();
-      setOperator(name);
-      if (name) saveOperator(name);
-      setOperatorLoaded(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    if (!phone || !operatorLoaded) return;
+    if (!phone) return;
     const timer = window.setTimeout(() => void lookup(phone, false), 0);
     return () => window.clearTimeout(timer);
-  }, [phone, operatorLoaded, lookup]);
+  }, [phone, lookup]);
 
   // 다른 화면에서 ?phone= 으로 열었으면 한 번 조회한 뒤 주소에서 번호를 지운다 — 새로 고치면 빈 화면으로 돌아간다.
   // (라우터가 첫 화면에서 주소를 다시 적는 일이 끝난 뒤에, 라우터 상태는 그대로 두고 주소만 바꾼다)
@@ -154,12 +135,6 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
       setError("전화번호를 확인해 주세요. (예: 010-1234-5678)");
       return;
     }
-    if (!operator.trim()) {
-      setError("조회하는 사람 이름을 먼저 적어 주세요.");
-      operatorRef.current?.focus();
-      return;
-    }
-    saveOperator(operator);
     setInput(formatPhone(digits));
     // 주소에는 번호를 남기지 않는다(새로 고치면 처음 화면으로).
     if (digits === phone) void lookup(digits, false);
@@ -168,12 +143,6 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
 
   function reveal() {
     if (!data || loading) return;
-    if (!operator.trim()) {
-      setError("조회하는 사람 이름을 먼저 적어 주세요.");
-      operatorRef.current?.focus();
-      return;
-    }
-    saveOperator(operator);
     void lookup(data.phone, true);
   }
 
@@ -203,22 +172,12 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
           aria-label="전화번호"
           autoFocus={!phone}
         />
-        <label className="cu-operator">
-          <span>조회하는 사람</span>
-          <input
-            ref={operatorRef}
-            value={operator}
-            maxLength={OPERATOR_MAX}
-            onChange={(event) => setOperator(event.target.value)}
-            placeholder="이름"
-          />
-        </label>
         <button type="submit" className="bc-primary" disabled={Boolean(loading)}>
           {loading === "lookup" ? <Loader2 size={15} className="spin-icon" /> : <Search size={15} />} 조회
         </button>
       </form>
       <div className="cu-tools">
-        <p className="cu-note">조회와 [자세히 보기]는 조회하는 사람 이름과 함께 조회 기록에 남아요.</p>
+        <p className="cu-note">조회와 [자세히 보기]는 조회 기록에 남아요.</p>
         <Link className="cu-more" href="/admin/access-logs">
           <History size={13} /> 조회 기록
         </Link>
@@ -339,12 +298,16 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
                             <em key={reason}>{reason}</em>
                           ))}
                         </span>
+                        <span className="cu-open">대화 보고 답하기 · AI 맞춤 초안 →</span>
                       </Link>
                     </li>
                   ))}
                 </ul>
               )}
-              <p className="cu-note">톡톡 상담은 대화에 이 번호가 적혔거나 블랙컨슈머로 이 번호와 함께 등록된 경우에만 이어져요.</p>
+              <p className="cu-note">
+                상담을 누르면 실시간 상담 화면에서 그 대화가 열려요 — 바로 답하고, 오른쪽 AI 도우미로 이 고객에 맞춘 답변 초안을 만들 수 있어요. 톡톡
+                상담은 대화에 이 번호가 적혔거나 블랙컨슈머로 이 번호와 함께 등록된 경우에만 이어져요.
+              </p>
             </section>
 
             <section className="cu-card cu-wide" aria-label="주문">

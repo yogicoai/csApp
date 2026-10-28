@@ -62,8 +62,8 @@ export function AccessLogList() {
   return (
     <section className="al-panel">
       <p className="al-guide">
-        고객 개인정보를 본 기록이에요. 2년 동안 보관하고 지나면 자동으로 지워져요. 한 달에 한 번은 이상한 조회가 없는지 확인해 주세요 — 이름이
-        없는 조회, 처음 보는 IP, 늦은 밤 조회, 짧은 시간에 몰린 조회, 로그인 실패가 이어진 경우.
+        고객 개인정보를 본 기록이에요. 2년 동안 보관하고 지나면 자동으로 지워져요. 한 달에 한 번은 이상한 조회가 없는지 확인해 주세요 — 처음
+        보는 IP, 늦은 밤 조회, 짧은 시간에 몰린 조회, 로그인 실패가 이어진 경우.
       </p>
       <div className="al-toolbar">
         <select value={days} onChange={(event) => setDays(Number(event.target.value))} aria-label="기간">

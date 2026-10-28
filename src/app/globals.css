@@ -10115,6 +10115,13 @@ a.lc-context-chip:hover {
   font-weight: 600;
 }
 
+.cu-open {
+  justify-self: end;
+  color: var(--primary-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 /* 조회 기록 */
 .al-panel {
   display: grid;
