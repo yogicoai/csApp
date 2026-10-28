@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordAccess } from "@/lib/accessLogServer";
 import { requireAdmin } from "@/lib/adminAuth";
 import { reasonLabel } from "@/lib/blackConsumer";
 import { type BlackConsumerRecord, currentFilter } from "@/lib/blackConsumerServer";
@@ -30,6 +31,8 @@ export async function GET() {
         `주의 고객 · ${(entry.reasons ?? []).map(reasonLabel).join("/")} · ${entry.until}까지`,
       ]),
     ];
+    // 개인정보를 파일로 내보내므로 조회 기록에 남긴 뒤에만 준다.
+    await recordAccess({ action: "export", detail: `블랙컨슈머 주소록 파일 · ${entries.length}명` });
     // 엑셀이 한글을 깨뜨리지 않게 UTF-8 BOM 을 붙인다.
     const csv = `﻿${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
     return new NextResponse(csv, {

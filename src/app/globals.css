@@ -10062,3 +10062,160 @@ a.lc-context-chip:hover {
     flex: 1;
   }
 }
+
+/* 고객 조회 — 조회하는 사람 · 가린 내용 · 자세히 보기 */
+.cu-operator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-left: 1px solid var(--line);
+  padding-left: 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.cu-operator input {
+  width: 96px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 7px 9px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cu-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: -4px;
+}
+
+.cu-tools .cu-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+}
+
+.cu-revealed {
+  border-radius: 999px;
+  background: #fff4e0;
+  color: #9a5b00;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cu-hidden {
+  color: #9aa7b4;
+  font-style: normal;
+  font-weight: 600;
+}
+
+/* 조회 기록 */
+.al-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  padding: 16px;
+}
+
+.al-guide {
+  border-radius: 10px;
+  background: #f6fbfd;
+  color: #3a4754;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.al-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.al-toolbar select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 9px 10px;
+  font-size: 13px;
+}
+
+.al-table-wrap {
+  overflow-x: auto;
+}
+
+.al-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.al-table th {
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  padding: 8px;
+  text-align: left;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.al-table td {
+  border-bottom: 1px solid #eef2f5;
+  padding: 8px;
+  vertical-align: top;
+}
+
+.al-table tr.is-login_failed td {
+  background: #fff7f6;
+}
+
+.al-time,
+.al-where {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.al-detail {
+  min-width: 220px;
+  color: #2f3a45;
+}
+
+.al-action {
+  border-radius: 6px;
+  background: #eef3f7;
+  color: #3a4754;
+  padding: 2px 7px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.al-action.is-reveal,
+.al-action.is-export {
+  background: #fff4e0;
+  color: #9a5b00;
+}
+
+.al-action.is-login_failed {
+  background: #fdecea;
+  color: #b4362a;
+}
+
+@media (max-width: 900px) {
+  .cu-search {
+    flex-wrap: wrap;
+  }
+
+  .cu-operator {
+    border-left: none;
+    padding-left: 0;
+  }
+}

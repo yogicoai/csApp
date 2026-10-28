@@ -1,21 +1,24 @@
 "use client";
 
-import { ClipboardList, Loader2, MessageCircle, Mic, Phone, Search, ShieldAlert, Truck } from "lucide-react";
+import { ClipboardList, Eye, History, Loader2, MessageCircle, Mic, Phone, Search, ShieldAlert, Truck } from "lucide-react";
 import Link from "next/link";
 import type React from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { shipmentStatusLabel } from "@/components/AssistPanel";
 import { reasonLabel } from "@/lib/blackConsumer";
 import type { OrderCandidate } from "@/lib/cafe24/service";
 import type { CustomerLookup as LookupResult, LookupSection } from "@/lib/customerLookup";
 import { outcomeLabel, TALK_PHOTO_PREFIX } from "@/lib/liveChatOptions";
+import { OPERATOR_MAX, readOperator, saveOperator } from "@/lib/operator";
 import { formatPhone, isPhoneDigits, phoneDigits } from "@/lib/phone";
 
 // 고객 조회 — 전화번호 하나로 녹취·실시간 상담(톡톡 포함)·홈페이지 게시판·주문·블랙컨슈머를 한 화면에 모은다.
+// 처음엔 무엇이 있는지만(이름·내용·회원 ID·송장은 가림) 보이고, [자세히 보기]를 누르면 서버가 조회 기록을 남긴 뒤 전체를 보낸다.
 // 각 칸에서 원래 화면(녹취·상담 콘솔)으로 바로 넘어간다.
 
 const STATUS_LABEL: Record<string, string> = { waiting: "대기", active: "상담중", closed: "종료" };
 const MATCH_LABEL: Record<string, string> = { buyer: "주문자", receiver: "받는 분", member: "회원", orderId: "주문번호" };
+const HIDDEN = "자세히 보기를 누르면 보여요";
 
 function kstText(iso: string, withTime = false) {
   if (!iso) return "";
@@ -38,6 +41,12 @@ function orderItemsText(order: OrderCandidate) {
 function SectionNote({ section }: { section: LookupSection<unknown> }) {
   if (!section.note) return null;
   return <p className={section.state === "error" ? "cu-note is-error" : "cu-note"}>{section.note}</p>;
+}
+
+// 가린 결과에서 비워 보낸 글 — 자리만 표시한다
+function Hidden({ masked, text, fallback }: { masked: boolean; text: string; fallback: string }) {
+  if (text) return <>{text}</>;
+  return masked ? <em className="cu-hidden">{HIDDEN}</em> : <>{fallback}</>;
 }
 
 function OrderList({ orders }: { orders: OrderCandidate[] }) {
@@ -80,34 +89,63 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
   const initialDigits = phoneDigits(initialPhone);
   const [input, setInput] = useState(isPhoneDigits(initialDigits) ? formatPhone(initialDigits) : initialPhone);
   const [phone, setPhone] = useState(isPhoneDigits(initialDigits) ? initialDigits : "");
+  const [operator, setOperator] = useState("");
+  const [operatorLoaded, setOperatorLoaded] = useState(false);
   const [data, setData] = useState<LookupResult | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"" | "lookup" | "detail">("");
   const [error, setError] = useState("");
+  // 자세히 보기를 연 시각 — 조회 기록에 남았다는 안내에 쓴다
+  const [revealedAt, setRevealedAt] = useState("");
+  const operatorRef = useRef<HTMLInputElement>(null);
 
-  const lookup = useCallback(async (digits: string) => {
-    setLoading(true);
+  const lookup = useCallback(async (digits: string, detail: boolean) => {
+    // 처리하는 사람은 쿠키로 서버에 가므로 요청 직전에 기억해 둔 이름과 맞춘다.
+    const name = readOperator();
+    if (name) saveOperator(name);
+    setLoading(detail ? "detail" : "lookup");
     setError("");
     try {
-      const response = await fetch(`/api/admin/customers?phone=${digits}`, { cache: "no-store" });
+      const response = await fetch(`/api/admin/customers?phone=${digits}${detail ? "&detail=1" : ""}`, { cache: "no-store" });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setData(null);
         setError(body.error ?? "고객 정보를 불러오지 못했어요.");
+        if (body.needOperator) operatorRef.current?.focus();
+        if (!detail) setData(null);
         return;
       }
       setData(body as LookupResult);
+      setRevealedAt(detail ? kstText(new Date().toISOString(), true).slice(11) : "");
     } catch {
       setError("고객 정보를 불러오지 못했어요.");
     } finally {
-      setLoading(false);
+      setLoading("");
     }
   }, []);
 
+  // 이 브라우저에 기억해 둔 '조회하는 사람'을 채운 뒤에 주소로 받은 번호를 조회한다.
   useEffect(() => {
-    if (!phone) return;
-    const timer = window.setTimeout(() => void lookup(phone), 0);
+    const timer = window.setTimeout(() => {
+      const name = readOperator();
+      setOperator(name);
+      if (name) saveOperator(name);
+      setOperatorLoaded(true);
+    }, 0);
     return () => window.clearTimeout(timer);
-  }, [phone, lookup]);
+  }, []);
+
+  useEffect(() => {
+    if (!phone || !operatorLoaded) return;
+    const timer = window.setTimeout(() => void lookup(phone, false), 0);
+    return () => window.clearTimeout(timer);
+  }, [phone, operatorLoaded, lookup]);
+
+  // 다른 화면에서 ?phone= 으로 열었으면 한 번 조회한 뒤 주소에서 번호를 지운다 — 새로 고치면 빈 화면으로 돌아간다.
+  // (라우터가 첫 화면에서 주소를 다시 적는 일이 끝난 뒤에, 라우터 상태는 그대로 두고 주소만 바꾼다)
+  useEffect(() => {
+    if (!window.location.search) return;
+    const timer = window.setTimeout(() => window.history.replaceState(window.history.state, "", "/admin/customers"), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -116,20 +154,40 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
       setError("전화번호를 확인해 주세요. (예: 010-1234-5678)");
       return;
     }
+    if (!operator.trim()) {
+      setError("조회하는 사람 이름을 먼저 적어 주세요.");
+      operatorRef.current?.focus();
+      return;
+    }
+    saveOperator(operator);
     setInput(formatPhone(digits));
-    // 주소에 번호를 남겨 두면 새로 고치거나 링크를 넘겨도 같은 조회가 열린다.
-    window.history.replaceState(null, "", `/admin/customers?phone=${digits}`);
-    if (digits === phone) void lookup(digits);
+    // 주소에는 번호를 남기지 않는다(새로 고치면 처음 화면으로).
+    if (digits === phone) void lookup(digits, false);
     else setPhone(digits);
   }
 
+  function reveal() {
+    if (!data || loading) return;
+    if (!operator.trim()) {
+      setError("조회하는 사람 이름을 먼저 적어 주세요.");
+      operatorRef.current?.focus();
+      return;
+    }
+    saveOperator(operator);
+    void lookup(data.phone, true);
+  }
+
+  const masked = data?.masked ?? true;
   const current = data?.blacklist.filter((entry) => entry.status === "active" || entry.status === "ending") ?? [];
   const past = data?.blacklist.filter((entry) => entry.status === "expired" || entry.status === "released") ?? [];
   const orderCount = data ? data.mallOrders.items.length + data.otherOrders.items.length : 0;
-  // 블랙컨슈머 등록 칸에 채울 이름 — 자사몰 주문자(실명) → 녹취 분석 이름
-  const guessName = data ? (data.mallOrders.items.find((order) => order.buyerName)?.buyerName ?? data.calls.find((call) => call.customerName)?.customerName ?? "") : "";
+  // 블랙컨슈머 등록 칸에 채울 이름·회원 ID — 가린 결과면 채우지 않는다(가린 값이 저장되지 않게).
+  const guessName =
+    data && !masked
+      ? (data.mallOrders.items.find((order) => order.buyerName)?.buyerName ?? data.calls.find((call) => call.customerName)?.customerName ?? "")
+      : "";
   const registerHref = data
-    ? `/admin/black-consumers?${new URLSearchParams({ new: "1", phone: data.phone, memberId: data.memberIds[0] ?? "", name: guessName })}`
+    ? `/admin/black-consumers?${new URLSearchParams({ new: "1", phone: data.phone, memberId: masked ? "" : (data.memberIds[0] ?? ""), name: guessName })}`
     : "";
 
   return (
@@ -145,16 +203,32 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
           aria-label="전화번호"
           autoFocus={!phone}
         />
-        <button type="submit" className="bc-primary" disabled={loading}>
-          {loading ? <Loader2 size={15} className="spin-icon" /> : <Search size={15} />} 조회
+        <label className="cu-operator">
+          <span>조회하는 사람</span>
+          <input
+            ref={operatorRef}
+            value={operator}
+            maxLength={OPERATOR_MAX}
+            onChange={(event) => setOperator(event.target.value)}
+            placeholder="이름"
+          />
+        </label>
+        <button type="submit" className="bc-primary" disabled={Boolean(loading)}>
+          {loading === "lookup" ? <Loader2 size={15} className="spin-icon" /> : <Search size={15} />} 조회
         </button>
       </form>
+      <div className="cu-tools">
+        <p className="cu-note">조회와 [자세히 보기]는 조회하는 사람 이름과 함께 조회 기록에 남아요.</p>
+        <Link className="cu-more" href="/admin/access-logs">
+          <History size={13} /> 조회 기록
+        </Link>
+      </div>
 
       {error && <p className="sc-error">{error}</p>}
       {!data && !loading && !error && (
         <p className="cu-intro">
           전화번호 하나로 이 고객의 녹취, 실시간 상담(네이버 톡톡 포함), 홈페이지 게시판 글, 주문(자사몰·스마트스토어·매장 택배)과 블랙컨슈머
-          여부를 한 번에 봐요.
+          여부를 한 번에 봐요. 처음엔 무엇이 있는지만 보이고, 이름·내용은 [자세히 보기]를 눌러야 보여요.
         </p>
       )}
 
@@ -167,6 +241,13 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
             </span>
             {data.memberIds.length > 0 && <span className="cu-members">자사몰 회원 {data.memberIds.join(", ")}</span>}
             <span className="bc-spacer" />
+            {masked ? (
+              <button type="button" className="bc-primary" disabled={Boolean(loading)} onClick={reveal}>
+                {loading === "detail" ? <Loader2 size={15} className="spin-icon" /> : <Eye size={15} />} 자세히 보기
+              </button>
+            ) : (
+              <span className="cu-revealed">자세히 보는 중 · {revealedAt} 조회 기록에 남김</span>
+            )}
             {current.length ? (
               <Link className="ln-ghost" href={`/admin/black-consumers?id=${current[0].id}`}>
                 <ShieldAlert size={14} /> 블랙컨슈머 보기
@@ -185,7 +266,9 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
                 <strong>
                   블랙컨슈머 · {entry.reasons.map(reasonLabel).join(" · ")} · {entry.until}까지
                 </strong>
-                <p>{entry.detail}</p>
+                <p>
+                  <Hidden masked={masked} text={entry.detail} fallback="" />
+                </p>
               </div>
             </div>
           ))}
@@ -214,7 +297,11 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
                           {call.category && <span className="cu-chip">{call.category}</span>}
                         </span>
                         <span className="cu-item-text">
-                          {call.status === "failed" ? "분석 실패" : call.summary || (call.status === "pending" ? "분석 중" : "요약 없음")}
+                          {call.status === "failed" ? (
+                            "분석 실패"
+                          ) : (
+                            <Hidden masked={masked} text={call.summary} fallback={call.status === "pending" ? "분석 중" : "요약 없음"} />
+                          )}
                         </span>
                       </Link>
                     </li>
@@ -241,7 +328,11 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
                           <time>{kstText(chat.createdAt, true)}</time>
                         </span>
                         <span className="cu-item-text">
-                          {chat.preview.startsWith(TALK_PHOTO_PREFIX) ? "[사진]" : chat.preview || "(메시지 없음)"}
+                          {chat.preview.startsWith(TALK_PHOTO_PREFIX) ? (
+                            "[사진]"
+                          ) : (
+                            <Hidden masked={masked} text={chat.preview} fallback="(메시지 없음)" />
+                          )}
                         </span>
                         <span className="cu-reasons">
                           {chat.matchedBy.map((reason) => (
@@ -281,6 +372,7 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
                   <SectionNote section={data.otherOrders} />
                 </div>
               </div>
+              {masked && orderCount > 0 && <p className="cu-note">주문자 이름·송장번호는 가려져 있어요. [자세히 보기]를 누르면 보여요.</p>}
             </section>
 
             <section className="cu-card" aria-label="홈페이지 게시판">
@@ -294,12 +386,14 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
                     <li key={post.key}>
                       <div className="cu-post">
                         <span className="cu-item-top">
-                          <strong>{post.title || "(제목 없음)"}</strong>
+                          <strong>
+                            <Hidden masked={masked} text={post.title} fallback="(제목 없음)" />
+                          </strong>
                           <span className="cu-chip">{post.boardName}</span>
                           <span>{post.answered ? "답변 완료" : "답변 전"}</span>
                           <time>{post.createdAt}</time>
                         </span>
-                        <span className="cu-item-text">{post.content}</span>
+                        {!masked && <span className="cu-item-text">{post.content}</span>}
                         <span className="cu-reasons">
                           {post.matchedBy.map((reason) => (
                             <em key={reason}>{reason}</em>

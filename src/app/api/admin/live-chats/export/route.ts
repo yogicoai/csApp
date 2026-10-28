@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordAccess } from "@/lib/accessLogServer";
 import { requireAdmin } from "@/lib/adminAuth";
 import { connectDB } from "@/lib/db";
 import { NOT_DELETED, type LiveChatRecord } from "@/lib/liveChat";
@@ -86,6 +87,12 @@ export async function GET(request: Request) {
       .join(",");
   });
 
+  // 대화 전문(개인정보)을 파일로 내보내므로 조회 기록에 남긴 뒤에만 준다.
+  try {
+    await recordAccess({ action: "export", detail: `상담 기록 CSV ${from} ~ ${to} · ${chats.length}건` });
+  } catch {
+    return NextResponse.json({ error: "조회 기록을 남기지 못해 파일을 만들 수 없어요. 잠시 후 다시 시도해 주세요." }, { status: 503 });
+  }
   const csv = "﻿" + [header.map(csvCell).join(","), ...rows].join("\r\n");
   return new Response(csv, {
     headers: {

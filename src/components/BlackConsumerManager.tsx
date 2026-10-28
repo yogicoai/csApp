@@ -13,10 +13,11 @@ import {
   reasonLabel,
   RETENTION_MONTHS,
 } from "@/lib/blackConsumer";
+import { OPERATOR_MAX, readOperator, saveOperator } from "@/lib/operator";
 import { formatPhone, phoneDigits } from "@/lib/phone";
 
 // 블랙컨슈머 관리 — CS 가 주의 고객을 등록·수정·연장·해제한다. 자동으로 막지 않고 상담·녹취 화면에 주의 표시만 한다.
-// 계정이 하나라 누가 처리했는지는 '처리하는 사람'으로 받아 이력에 남긴다(이 브라우저에 기억).
+// 계정이 하나라 누가 처리했는지는 '처리하는 사람'으로 받아 이력·조회 기록에 남긴다(lib/operator — 이 브라우저에 기억).
 
 type Tab = "current" | "ending" | "ended" | "all";
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -57,7 +58,6 @@ type FormState = {
 
 type Dialog = { kind: "extend" | "release" | "reopen" | "delete"; entry: BlackConsumerView; months: number; note: string };
 
-const BY_KEY = "cs_admin_black_by";
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const CRITERIA_EXAMPLE = [
   "예)",
@@ -65,22 +65,6 @@ const CRITERIA_EXAMPLE = [
   "· 응대: 녹음 고지 후 경고 1회, 계속되면 통화를 끝내고 상담 기록에 남기기",
   "· 해제: 기간이 끝나면 다시 검토, 잘못 등록했거나 사과가 확인되면 바로 해제",
 ].join("\n");
-
-function readBy() {
-  try {
-    return window.localStorage.getItem(BY_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function saveBy(value: string) {
-  try {
-    window.localStorage.setItem(BY_KEY, value);
-  } catch {
-    // 저장이 막힌 브라우저면 다음에 다시 적으면 된다.
-  }
-}
 
 // ISO 시각 → KST 날짜(·시각)
 function kstText(iso: string, withTime = false) {
@@ -149,9 +133,13 @@ export function BlackConsumerManager({ prefill }: { prefill: BlackPrefill }) {
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  // 처리하는 사람 — 첫 화면을 그린 뒤 이 브라우저에 기억해 둔 이름을 채운다.
+  // 처리하는 사람 — 첫 화면을 그린 뒤 이 브라우저에 기억해 둔 이름을 채운다(조회 기록용 쿠키도 맞춰 둔다).
   useEffect(() => {
-    const timer = window.setTimeout(() => setBy(readBy()), 0);
+    const timer = window.setTimeout(() => {
+      const name = readOperator();
+      setBy(name);
+      if (name) saveOperator(name);
+    }, 0);
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -207,7 +195,7 @@ export function BlackConsumerManager({ prefill }: { prefill: BlackPrefill }) {
 
   function needBy() {
     if (by.trim()) {
-      saveBy(by.trim());
+      saveOperator(by);
       return false;
     }
     setError("처리하는 사람 이름을 먼저 적어 주세요.");
@@ -364,10 +352,19 @@ export function BlackConsumerManager({ prefill }: { prefill: BlackPrefill }) {
         </label>
         <label className="bc-by">
           <span>처리하는 사람</span>
-          <input id="bc-by" value={by} maxLength={20} onChange={(event) => setBy(event.target.value)} placeholder="이름" />
+          <input id="bc-by" value={by} maxLength={OPERATOR_MAX} onChange={(event) => setBy(event.target.value)} placeholder="이름" />
         </label>
         <div className="bc-toolbar-actions">
-          <a className="ln-ghost" href="/api/admin/black-consumers/export" download title="주의 중인 고객 중 전화번호가 있는 고객만 담겨요">
+          <a
+            className="ln-ghost"
+            href="/api/admin/black-consumers/export"
+            download
+            title="주의 중인 고객 중 전화번호가 있는 고객만 담겨요. 내려받으면 조회 기록에 남아요."
+            onClick={(event) => {
+              // 개인정보 파일이라 누가 받았는지 조회 기록에 남긴다 — 이름이 없으면 먼저 받는다.
+              if (needBy()) event.preventDefault();
+            }}
+          >
             <Download size={14} /> 통화매니저 주소록 파일
           </a>
           <button type="button" className="bc-primary" onClick={startNew}>
@@ -580,9 +577,8 @@ export function BlackConsumerManager({ prefill }: { prefill: BlackPrefill }) {
       {!loaded ? (
         <p className="bc-muted">불러오는 중…</p>
       ) : entries.length === 0 ? (
-        <p className="sc-empty bc-empty">
-          {query ? "찾는 고객이 없어요." : tab === "current" ? "주의 중인 고객이 없어요." : "해당하는 고객이 없어요."}
-        </p>
+        // 빈 탭은 위 숫자(0)로 충분해 안내를 띄우지 않고, 검색 결과가 없을 때만 알려 준다.
+        query && <p className="sc-empty bc-empty">찾는 고객이 없어요.</p>
       ) : (
         <ul className="bc-list">
           {entries.map((entry) => {

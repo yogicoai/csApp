@@ -1,3 +1,4 @@
+import { maskId, maskName, maskTail } from "@/lib/accessLog";
 import type { BlackConsumerView } from "@/lib/blackConsumer";
 import { type BlackConsumerRecord, serializeBlackConsumer } from "@/lib/blackConsumerServer";
 import { HOMEPAGE_BOARDS } from "@/lib/boards";
@@ -71,6 +72,8 @@ export type CustomerLookup = {
   phone: string;
   phoneLabel: string;
   days: number;
+  // 가린 결과인가 — 기본 조회는 이름·내용·회원 ID·송장을 가리고, [자세히 보기](조회 기록에 남김)에서만 전체를 보낸다.
+  masked: boolean;
   blacklist: BlackConsumerView[];
   calls: LookupCall[];
   chats: LookupChat[];
@@ -104,6 +107,44 @@ function toLookupCall(call: VoiceCallRecord): LookupCall {
     summary: call.analysis?.summary ?? "",
     customerName: call.analysis?.customerName ?? "",
   };
+}
+
+// 기본 조회 결과 — 무엇이 있는지(건수·날짜·종류·상태)는 보이고, 이름·회원 ID·송장·글 내용은 가린다.
+// 블랙컨슈머는 응대 전에 바로 알아야 하므로 사유·기간은 그대로 둔다(있었던 일은 가린다).
+export function maskLookup(result: CustomerLookup): CustomerLookup {
+  const maskOrder = (order: OrderCandidate): OrderCandidate => ({
+    ...order,
+    buyerName: maskName(order.buyerName),
+    receiverName: maskName(order.receiverName),
+    shipment: order.shipment ? { ...order.shipment, trackingNumber: maskTail(order.shipment.trackingNumber), trackingUrl: "" } : null,
+  });
+  return {
+    ...result,
+    masked: true,
+    memberIds: result.memberIds.map(maskId),
+    blacklist: result.blacklist.map((entry) => ({
+      ...entry,
+      name: maskName(entry.name),
+      memberId: maskId(entry.memberId),
+      detail: "",
+      refs: "",
+      releaseNote: "",
+      history: [],
+    })),
+    calls: result.calls.map((call) => ({ ...call, summary: "", customerName: maskName(call.customerName) })),
+    chats: result.chats.map((chat) => ({ ...chat, preview: "" })),
+    mallOrders: { ...result.mallOrders, items: result.mallOrders.items.map(maskOrder) },
+    otherOrders: { ...result.otherOrders, items: result.otherOrders.items.map(maskOrder) },
+    posts: { ...result.posts, items: result.posts.items.map((post) => ({ ...post, title: "", content: "", writer: maskName(post.writer) })) },
+  };
+}
+
+// 조회 기록에 남길 한 줄 — 무엇이 몇 건 나왔는지
+export function lookupSummary(result: CustomerLookup) {
+  const orders = result.mallOrders.items.length + result.otherOrders.items.length;
+  return `녹취 ${result.calls.length} · 상담 ${result.chats.length} · 게시판 ${result.posts.items.length} · 주문 ${orders}${
+    result.blacklist.length ? ` · 블랙컨슈머 ${result.blacklist.length}` : ""
+  }`;
 }
 
 // 자사몰 주문 합치기 — 같은 주문을 번호·회원으로 모두 찾았으면 찾은 이유를 합친다.
@@ -270,6 +311,7 @@ export async function lookupCustomer(digits: string): Promise<CustomerLookup> {
     phone: digits,
     phoneLabel: formatPhone(digits),
     days: LOOKUP_DAYS,
+    masked: false,
     blacklist: blackEntries.map((entry) => serializeBlackConsumer(entry, today)),
     calls: calls.map(toLookupCall),
     chats,
