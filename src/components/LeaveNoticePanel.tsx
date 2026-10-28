@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Download, Loader2, Megaphone, RotateCcw } from "lucide-react";
+import { ChevronDown, Copy, Download, Loader2, Megaphone, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { CLOSURE_CHANGED_EVENT } from "@/components/LiveChat";
 import { DATE_TOKEN, LEAD_DAYS_MAX, type LeaveNoticeSettings, type LeavePeriod, NOTES_MAX } from "@/lib/leaveNotice";
@@ -19,6 +19,17 @@ type NoticeData = {
 };
 
 type PreviewMode = "pc" | "mobile" | "image";
+
+// 패널 펼침 여부 — 늘 펼쳐져 있으면 연차 관리 화면이 복잡해서 기본은 접고, 이 브라우저에 마지막 상태를 기억한다.
+const OPEN_KEY = "cs_admin_leave_notice_open";
+
+function readOpen() {
+  try {
+    return window.localStorage.getItem(OPEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 const PREVIEW_MODES: Array<{ id: PreviewMode; label: string; caption: string }> = [
   {
@@ -91,6 +102,20 @@ function periodState(period: PeriodView) {
   return { className: "is-soon", label: `${dayLabel(period.showFrom)}부터 노출` };
 }
 
+// 접혀 있을 때 머리줄 한 줄 — 가장 가까운 휴무와 노출 상태(지금 떠 있는지는 접혀 있어도 보이게)
+function ClosedSummary({ periods }: { periods: PeriodView[] }) {
+  const [first, ...rest] = periods;
+  if (!first) return <span>예정된 휴무가 없어요</span>;
+  const state = periodState(first);
+  return (
+    <>
+      <span>{first.dateLabel}</span>
+      <em className={`ln-state ${state.className}`}>{state.label}</em>
+      {rest.length > 0 && <span>외 {rest.length}건</span>}
+    </>
+  );
+}
+
 function withNoteRows(notes: LeaveNoticeSettings["notes"]) {
   const rows = notes.slice(0, NOTES_MAX).map((note) => ({ ...note }));
   while (rows.length < NOTES_MAX) rows.push({ text: "", highlight: false });
@@ -107,6 +132,7 @@ export function LeaveNoticePanel() {
   const [error, setError] = useState("");
   // 설치 코드에 넣을 이 앱 주소 — 서버 렌더와 어긋나지 않게 화면에서 읽는다.
   const [origin, setOrigin] = useState("");
+  const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<PreviewMode>("pc");
   // 미리보기에서 닫은 팝업 다시 띄우기 · 문구를 고치면 공지 이미지도 새로 받기
   const [replay, setReplay] = useState(0);
@@ -128,6 +154,7 @@ export function LeaveNoticePanel() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setOrigin(window.location.origin);
+      setOpen(readOpen());
       void load();
     }, 0);
     const refresh = () => void load();
@@ -197,11 +224,21 @@ export function LeaveNoticePanel() {
     }
   }
 
+  function toggleOpen(next: boolean) {
+    setOpen(next);
+    try {
+      window.localStorage.setItem(OPEN_KEY, next ? "1" : "0");
+    } catch {
+      /* 저장이 막힌 브라우저는 이 화면에서만 */
+    }
+  }
+
   function startEdit() {
     if (!data) return;
     setForm({ ...data.settings, notes: withNoteRows(data.settings.notes) });
     setEditing(true);
     setMessage("");
+    if (!open) toggleOpen(true);
   }
 
   async function saveSettings(next: LeaveNoticeSettings) {
@@ -236,21 +273,35 @@ export function LeaveNoticePanel() {
         <Megaphone size={17} />
         <div>
           <strong>홈페이지 휴무 팝업</strong>
-          <p>
-            지정한 휴무를 기간으로 묶어 cafe24 홈페이지에 팝업으로 띄워요 — 휴무{" "}
-            {data ? `${data.settings.leadDays}일` : "며칠"} 전부터 상담이 다시 열릴 때까지만 보여요. 같은 내용을 이미지로
-            내려받아 톡톡·카카오 공지에도 쓸 수 있어요.
-          </p>
+          {open ? (
+            <p>
+              지정한 휴무를 기간으로 묶어 cafe24 홈페이지에 팝업으로 띄워요 — 휴무{" "}
+              {data ? `${data.settings.leadDays}일` : "며칠"} 전부터 상담이 다시 열릴 때까지만 보여요. 같은 내용을 이미지로
+              내려받아 톡톡·카카오 공지에도 쓸 수 있어요.
+            </p>
+          ) : (
+            data && (
+              <p className="ln-head-summary">
+                <ClosedSummary periods={data.periods} />
+              </p>
+            )
+          )}
         </div>
-        <button type="button" className="ln-ghost" onClick={startEdit} disabled={!data}>
-          문구 수정
-        </button>
+        <div className="ln-head-actions">
+          <button type="button" className="ln-ghost" onClick={startEdit} disabled={!data}>
+            문구 수정
+          </button>
+          <button type="button" className="ln-ghost ln-toggle" aria-expanded={open} onClick={() => toggleOpen(!open)}>
+            <ChevronDown size={14} className={open ? "is-open" : undefined} />
+            {open ? "접기" : "펼치기"}
+          </button>
+        </div>
       </header>
 
       {error && <p className="sc-error">{error}</p>}
       {message && <p className="sc-notice">{message}</p>}
 
-      {editing && form && (
+      {open && editing && form && (
         <div className="ln-form">
           <label>
             <span>노출 시작</span>
@@ -334,7 +385,7 @@ export function LeaveNoticePanel() {
         </div>
       )}
 
-      {data && (
+      {open && data && (
         <div className="ln-body">
           {data.periods.length === 0 ? (
             <p className="sc-empty ln-empty">
@@ -424,20 +475,22 @@ export function LeaveNoticePanel() {
         </div>
       )}
 
-      <details className="ln-install">
-        <summary>cafe24 자동 팝업 설치 코드 (한 번만)</summary>
-        <p>
-          cafe24 디자인 편집에서 공통 레이아웃 맨 아래에 아래 한 줄을 넣어 두면, 위 목록의 &lsquo;팝업&rsquo;이 켜진 휴무만
-          노출 기간에 자동으로 떠요(고객은 &lsquo;오늘 하루 보지 않기&rsquo;로 닫을 수 있어요).
-          {isLocal && " 지금 주소는 이 PC 주소라, 서버에 올린 뒤 그 주소로 된 코드를 넣어야 해요."}
-        </p>
-        <div className="ln-code">
-          <code>{installCode}</code>
-          <button type="button" className="ln-ghost" onClick={() => void copyText(installCode, "설치 코드를 복사했어요.")}>
-            <Copy size={14} /> 복사
-          </button>
-        </div>
-      </details>
+      {open && (
+        <details className="ln-install">
+          <summary>cafe24 자동 팝업 설치 코드 (한 번만)</summary>
+          <p>
+            cafe24 디자인 편집에서 공통 레이아웃 맨 아래에 아래 한 줄을 넣어 두면, 위 목록의 &lsquo;팝업&rsquo;이 켜진 휴무만
+            노출 기간에 자동으로 떠요(고객은 &lsquo;오늘 하루 보지 않기&rsquo;로 닫을 수 있어요).
+            {isLocal && " 지금 주소는 이 PC 주소라, 서버에 올린 뒤 그 주소로 된 코드를 넣어야 해요."}
+          </p>
+          <div className="ln-code">
+            <code>{installCode}</code>
+            <button type="button" className="ln-ghost" onClick={() => void copyText(installCode, "설치 코드를 복사했어요.")}>
+              <Copy size={14} /> 복사
+            </button>
+          </div>
+        </details>
+      )}
     </section>
   );
 }

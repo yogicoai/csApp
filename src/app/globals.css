@@ -8816,6 +8816,35 @@ a.lc-context-chip:hover {
   line-height: 1.55;
 }
 
+/* 접혀 있을 때 — 가장 가까운 휴무와 노출 상태 한 줄 */
+.ln-head-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ln-head-summary > span:first-child {
+  color: #2f3a45;
+  font-weight: 700;
+}
+
+/* .ln-head > div(제목 칸) 규칙이 버튼 묶음에 걸리지 않게 */
+.ln-head > .ln-head-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ln-toggle svg {
+  transition: transform 0.15s ease;
+}
+
+.ln-toggle svg.is-open {
+  transform: rotate(180deg);
+}
+
 .ln-ghost {
   display: inline-flex;
   align-items: center;
