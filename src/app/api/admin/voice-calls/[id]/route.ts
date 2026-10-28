@@ -2,6 +2,7 @@ import { unlink } from "node:fs/promises";
 import { isValidObjectId } from "mongoose";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/adminAuth";
+import { callCautions } from "@/lib/blackConsumerServer";
 import { connectDB } from "@/lib/db";
 import { runVoiceAnalysis, serializeVoiceCall, type VoiceCallRecord } from "@/lib/voiceCall";
 import { VoiceCall } from "@/models/VoiceCall";
@@ -23,7 +24,8 @@ export async function GET(_request: Request, { params }: Params) {
   const { id } = await params;
   const call = await VoiceCall.findById(isValidObjectId(id) ? id : undefined).lean<VoiceCallRecord | null>();
   if (!call) return NextResponse.json({ error: "녹취를 찾을 수 없어요." }, { status: 404 });
-  return NextResponse.json({ call: serializeVoiceCall(call) });
+  const cautions = await callCautions([call]);
+  return NextResponse.json({ call: serializeVoiceCall(call), caution: cautions[String(call._id)] ?? null });
 }
 
 // 전사 텍스트 수정·다시 분석.

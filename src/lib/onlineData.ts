@@ -60,7 +60,16 @@ function toCandidate(row: OnlineDataOrder): OrderCandidate {
 
 // 주문자 이름 + 주문일 범위(YYYY-MM-DD, 매장 택배는 발송일 범위)
 export async function searchOtherChannelOrders(name: string, from: string, to: string) {
-  const params = new URLSearchParams({ name, start: from, end: to });
+  return fetchOtherChannelOrders(new URLSearchParams({ name, start: from, end: to }));
+}
+
+// 연락처 + 주문일 범위(고객 조회) — onlineData 는 번호를 다 적으면 사본 번호 전체가 같아야 하고,
+// 사본 번호가 가려져 있으면(010-****-1234) 끝 4자리로만 맞춘다(화면에서 이름으로 본인 확인).
+export async function searchOtherChannelOrdersByPhone(phone: string, from: string, to: string) {
+  return fetchOtherChannelOrders(new URLSearchParams({ phone, start: from, end: to }));
+}
+
+async function fetchOtherChannelOrders(params: URLSearchParams) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
   try {

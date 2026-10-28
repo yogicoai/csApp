@@ -11,6 +11,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
+  ShieldAlert,
+  UserSearch,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -35,6 +37,8 @@ const MENU = [
   { href: "/admin/live-chat", label: "실시간 상담", icon: MessagesSquare },
   { href: "/admin/boards", label: "게시판 관리", icon: ClipboardList },
   { href: "/admin/voice", label: "음성 상담 분석", icon: Mic },
+  { href: "/admin/customers", label: "고객 조회", icon: UserSearch },
+  { href: "/admin/black-consumers", label: "블랙컨슈머", icon: ShieldAlert },
   { href: "/admin/faqs", label: "FAQ 관리", icon: Pencil },
   { href: "/admin/leave", label: "연차 관리", icon: CalendarDays },
   { href: "/admin/guide", label: "사용 가이드", icon: BookOpen },

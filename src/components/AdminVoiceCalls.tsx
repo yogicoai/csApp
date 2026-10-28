@@ -7,12 +7,16 @@ import {
   Mic,
   RefreshCw,
   Search,
+  ShieldAlert,
   Sparkles,
   Trash2,
   Upload,
+  UserSearch,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { type CautionView, cautionText } from "@/lib/blackConsumer";
 
 // 음성 상담 분석 — TWC 대체 계획의 "녹음 보관 + AI 요약·답변 초안 + 녹취 찾기" 화면.
 // 녹음 파일을 올리면 전사(OpenAI) 후 CS 티켓 양식(상담유형·구분태그·상담요약·상담내용)으로 정리한다.
@@ -87,11 +91,15 @@ function readAudioDuration(file: File) {
   });
 }
 
-export function AdminVoiceCalls() {
+// initialQuery·initialCallId — 고객 조회에서 녹취를 눌러 왔을 때 그 번호로 찾아 바로 연다.
+export function AdminVoiceCalls({ initialQuery = "", initialCallId = "" }: { initialQuery?: string; initialCallId?: string }) {
   const [calls, setCalls] = useState<VoiceCallItem[]>([]);
   const [listLoading, setListLoading] = useState(true);
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(initialQuery);
   const [selected, setSelected] = useState<VoiceCallItem | null>(null);
+  // 블랙컨슈머 주의 표시 — 목록의 녹취별 표시와, 고른 녹취의 최신 표시(undefined = 아직 상세를 받기 전이라 목록 값을 쓴다)
+  const [cautions, setCautions] = useState<Record<string, CautionView>>({});
+  const [selectedCaution, setSelectedCaution] = useState<CautionView | null | undefined>(undefined);
   const [mode, setMode] = useState<"file" | "text">("file");
   const [file, setFile] = useState<File | null>(null);
   const [pasted, setPasted] = useState("");
@@ -111,8 +119,13 @@ export function AdminVoiceCalls() {
         cache: "no-store",
       });
       if (!response.ok) return;
-      const body = (await response.json()) as { calls: VoiceCallItem[]; storage?: "dropbox" | "local" };
+      const body = (await response.json()) as {
+        calls: VoiceCallItem[];
+        cautions?: Record<string, CautionView>;
+        storage?: "dropbox" | "local";
+      };
       setCalls(body.calls ?? []);
+      setCautions(body.cautions ?? {});
       setStorage(body.storage === "dropbox" ? "dropbox" : "local");
     } finally {
       setListLoading(false);
@@ -124,15 +137,26 @@ export function AdminVoiceCalls() {
     return () => window.clearTimeout(timer);
   }, [q, loadList]);
 
-  async function selectCall(item: VoiceCallItem) {
+  const selectCall = useCallback(async (item: VoiceCallItem) => {
     setShowTranscript(false);
     setSelected(item);
+    setSelectedCaution(undefined);
     const response = await fetch(`/api/admin/voice-calls/${item.id}`, { cache: "no-store" });
     if (response.ok) {
-      const body = (await response.json()) as { call: VoiceCallItem };
+      const body = (await response.json()) as { call: VoiceCallItem; caution?: CautionView | null };
       setSelected(body.call);
+      setSelectedCaution(body.caution ?? null);
     }
-  }
+  }, []);
+
+  // 고객 조회에서 고른 녹취 — 목록에 나오면 한 번 연다.
+  const pendingCallRef = useRef(initialCallId);
+  useEffect(() => {
+    const target = pendingCallRef.current ? calls.find((item) => item.id === pendingCallRef.current) : undefined;
+    if (!target) return;
+    pendingCallRef.current = "";
+    window.setTimeout(() => void selectCall(target), 0);
+  }, [calls, selectCall]);
 
   function onPickFile(next: File | null) {
     setFile(next);
@@ -295,6 +319,9 @@ export function AdminVoiceCalls() {
   }
 
   const analysis = selected?.analysis ?? null;
+  const caution = selected ? (selectedCaution === undefined ? (cautions[selected.id] ?? null) : selectedCaution) : null;
+  // 고객 조회·블랙컨슈머 등록에 쓸 번호 — 통화 번호가 없으면 분석에서 나온 고객 연락처
+  const customerPhone = selected ? selected.phoneNumber || (analysis?.customerPhone ?? "").replace(/\D/g, "") : "";
 
   return (
     <div className="vc-admin">
@@ -378,6 +405,11 @@ export function AdminVoiceCalls() {
               >
                 <div className="vc-item-top">
                   <strong>{formatPhone(item.phoneNumber)}</strong>
+                  {cautions[item.id] && (
+                    <span className="bc-flag" title={`블랙컨슈머 · ${cautionText(cautions[item.id])}`}>
+                      <ShieldAlert size={11} /> 블랙
+                    </span>
+                  )}
                   <span>{formatCallDate(item.callDate || item.createdAt)}</span>
                 </div>
                 <p>
@@ -415,6 +447,27 @@ export function AdminVoiceCalls() {
                 </span>
               </div>
               <div className="vc-detail-actions">
+                {customerPhone && (
+                  <Link href={`/admin/customers?phone=${customerPhone}`}>
+                    <UserSearch size={14} /> 고객 조회
+                  </Link>
+                )}
+                {caution ? (
+                  <Link className="is-caution" href={`/admin/black-consumers?id=${caution.id}`}>
+                    <ShieldAlert size={14} /> 블랙컨슈머 보기
+                  </Link>
+                ) : (
+                  <Link
+                    href={`/admin/black-consumers?${new URLSearchParams({
+                      new: "1",
+                      phone: customerPhone,
+                      name: analysis?.customerName ?? "",
+                      refs: `녹취 ${formatCallDate(selected.callDate || selected.createdAt)}`,
+                    })}`}
+                  >
+                    <ShieldAlert size={14} /> 블랙컨슈머 등록
+                  </Link>
+                )}
                 {selected.status === "done" &&
                   (selected.assetClaimId ? (
                     <button type="button" className="is-sent" disabled>
@@ -433,6 +486,16 @@ export function AdminVoiceCalls() {
                 </button>
               </div>
             </header>
+
+            {caution && (
+              <div className="lc-caution" role="alert">
+                <ShieldAlert size={16} />
+                <span>
+                  <strong>블랙컨슈머</strong> {cautionText(caution)} — 응대에 주의하세요
+                </span>
+                <Link href={`/admin/black-consumers?id=${caution.id}`}>자세히</Link>
+              </div>
+            )}
 
             {selected.hasAudio && (
               <audio className="vc-audio" controls preload="none" src={`/api/admin/voice-calls/${selected.id}/audio`} />

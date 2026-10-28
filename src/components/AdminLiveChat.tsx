@@ -10,14 +10,18 @@ import {
   RotateCcw,
   Search,
   Send,
+  ShieldAlert,
   Smartphone,
   Sparkles,
   Trash2,
+  UserSearch,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AdminLiveChatAssist } from "@/components/AdminLiveChatAssist";
+import { type CautionView, cautionText } from "@/lib/blackConsumer";
 import { kstDateString, kstToday, shiftDay } from "@/lib/liveChatHours";
 import {
   appLabel,
@@ -379,7 +383,16 @@ function beep() {
   }
 }
 
-export function AdminLiveChat({ initialVia = "" }: { initialVia?: string }) {
+// initialQuery·initialChatId — 고객 조회에서 상담을 눌러 왔을 때 그 상담번호로 찾아 바로 연다.
+export function AdminLiveChat({
+  initialVia = "",
+  initialQuery = "",
+  initialChatId = "",
+}: {
+  initialVia?: string;
+  initialQuery?: string;
+  initialChatId?: string;
+}) {
   const [tab, setTab] = useState<"open" | "closed">("open");
   const [closedFilter, setClosedFilter] = useState("");
   // 경로 거르기(전체·셀프가이드·네이버 톡톡) — 진행 중·종료·검색 목록과 건수에 모두 적용된다.
@@ -391,8 +404,8 @@ export function AdminLiveChat({ initialVia = "" }: { initialVia?: string }) {
   const [day, setDay] = useState(kstToday);
   const [stats, setStats] = useState<DayStats | null>(null);
   // 검색 — 입력이 0.3초 멈추면 검색어로 반영한다(상태·날짜와 상관없이 찾는다).
-  const [search, setSearch] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [search, setSearch] = useState(initialQuery);
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [listMode, setListMode] = useState<"list" | "search">("list");
   // 목록을 받은 시각 — 대기 시간(SLA) 계산 기준
   const [loadedAt, setLoadedAt] = useState(0);
@@ -402,6 +415,9 @@ export function AdminLiveChat({ initialVia = "" }: { initialVia?: string }) {
   const [listError, setListError] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [selected, setSelected] = useState<ChatSummary | null>(null);
+  // 블랙컨슈머 주의 표시 — 목록의 상담별 표시와, 열어 둔 상담의 최신 표시(undefined = 아직 대화를 받기 전이라 목록 값을 쓴다)
+  const [cautions, setCautions] = useState<Record<string, CautionView>>({});
+  const [selectedCaution, setSelectedCaution] = useState<CautionView | null | undefined>(undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -429,6 +445,7 @@ export function AdminLiveChat({ initialVia = "" }: { initialVia?: string }) {
   const alertCount = counts.all.waiting + counts.all.unread;
   const talkAlertCount = counts.talk.waiting + counts.talk.unread;
   const closed = selected?.status === "closed";
+  const caution = selected ? (selectedCaution === undefined ? (cautions[selected.id] ?? null) : selectedCaution) : null;
 
   const loadList = useCallback(async () => {
     try {
@@ -453,6 +470,7 @@ export function AdminLiveChat({ initialVia = "" }: { initialVia?: string }) {
       }
       setListError("");
       setChats(body.chats ?? []);
+      setCautions(body.cautions ?? {});
       setCounts({ ...EMPTY_COUNTS, ...body.counts });
       setTalkConnected(typeof body.talkConnected === "boolean" ? body.talkConnected : null);
       setListMode(body.mode === "search" ? "search" : "list");
@@ -484,6 +502,7 @@ export function AdminLiveChat({ initialVia = "" }: { initialVia?: string }) {
         }
         setChatError("");
         setSelected(body.chat);
+        setSelectedCaution(body.caution ?? null);
         applyMessages(body.messages ?? []);
       } catch {
         if (selectedRef.current === id) setChatError("대화를 불러오지 못했습니다.");
@@ -586,12 +605,13 @@ export function AdminLiveChat({ initialVia = "" }: { initialVia?: string }) {
     }
   }, [alertCount, talkAlertCount]);
 
-  function selectChat(chat: ChatSummary) {
-    if (chat.id === selectedId) return;
+  const selectChat = useCallback((chat: ChatSummary) => {
+    if (chat.id === selectedRef.current) return;
     selectedRef.current = chat.id;
     lastSeqRef.current = 0;
     setSelectedId(chat.id);
     setSelected(chat);
+    setSelectedCaution(undefined);
     setMessages([]);
     setDraft("");
     setAssetError("");
@@ -599,7 +619,16 @@ export function AdminLiveChat({ initialVia = "" }: { initialVia?: string }) {
     setOutcomePicker(null);
     setOutcomeMemo("");
     setDeletePicker(false);
-  }
+  }, []);
+
+  // 고객 조회에서 고른 상담 — 검색 결과에 나오면 한 번 연다.
+  const pendingChatRef = useRef(initialChatId);
+  useEffect(() => {
+    const target = pendingChatRef.current ? chats.find((chat) => chat.id === pendingChatRef.current) : undefined;
+    if (!target) return;
+    pendingChatRef.current = "";
+    window.setTimeout(() => selectChat(target), 0);
+  }, [chats, selectChat]);
 
   async function enableNotifications() {
     if (typeof Notification === "undefined") return;
@@ -952,6 +981,11 @@ export function AdminLiveChat({ initialVia = "" }: { initialVia?: string }) {
                   <span className="lc-item-top">
                     <span className={`lc-chip ${statusChip(chat).className}`}>{statusChip(chat).label}</span>
                     <span className="lc-item-channel">{originLabel(chat)}</span>
+                    {cautions[chat.id] && (
+                      <span className="bc-flag" title={`블랙컨슈머 · ${cautionText(cautions[chat.id])}`}>
+                        <ShieldAlert size={11} /> 블랙
+                      </span>
+                    )}
                     {chat.visitorOnline && chat.status !== "closed" && (
                       <span className="lc-online" title="고객이 상담 화면을 보고 있어요" />
                     )}
@@ -1166,6 +1200,16 @@ export function AdminLiveChat({ initialVia = "" }: { initialVia?: string }) {
                 </div>
               )}
 
+              {caution && (
+                <div className="lc-caution" role="alert">
+                  <ShieldAlert size={16} />
+                  <span>
+                    <strong>블랙컨슈머</strong> {cautionText(caution)} — 응대에 주의하세요
+                  </span>
+                  <Link href={`/admin/black-consumers?id=${caution.id}`}>자세히</Link>
+                </div>
+              )}
+
               <div className="lc-context" aria-label="고객 맥락">
                 {contextChips(selected).map((chip) =>
                   chip.href ? (
@@ -1179,6 +1223,29 @@ export function AdminLiveChat({ initialVia = "" }: { initialVia?: string }) {
                       {chip.value}
                     </span>
                   ),
+                )}
+                {!selected.deletedAt && (
+                  <span className="lc-context-tools">
+                    {selected.contactPhone && (
+                      <Link href={`/admin/customers?phone=${selected.contactPhone}`}>
+                        <UserSearch size={12} /> 고객 조회
+                      </Link>
+                    )}
+                    {!caution && (
+                      <Link
+                        href={`/admin/black-consumers?${new URLSearchParams({
+                          new: "1",
+                          chat: selected.id,
+                          ticket: selected.ticketNo,
+                          talk: selected.source.via === TALK_VIA ? "1" : "",
+                          phone: selected.contactPhone,
+                          memberId: selected.memberId,
+                        })}`}
+                      >
+                        <ShieldAlert size={12} /> 블랙컨슈머 등록
+                      </Link>
+                    )}
+                  </span>
                 )}
               </div>
 

@@ -2,8 +2,10 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/adminAuth";
+import { callCautions } from "@/lib/blackConsumerServer";
 import { connectDB } from "@/lib/db";
 import { downloadFile, isDropboxConfigured, isVoicePath } from "@/lib/dropbox";
+import { phoneTextPattern } from "@/lib/phone";
 import {
   parseRecordingFileName,
   runVoiceAnalysis,
@@ -33,10 +35,13 @@ export async function GET(request: Request) {
   await connectDB();
 
   const q = (new URL(request.url).searchParams.get("q") ?? "").trim();
+  const digits = q.replace(/\D/g, "");
   const filter = q
     ? {
         $or: [
           { phoneNumber: { $regex: escapeRegex(q.replace(/[-\s]/g, "")) } },
+          // 통화 번호가 없어도 분석에서 나온 고객 연락처(010 1234 5678 처럼 적힌 것도)로 찾는다 — 고객 조회에서 넘어온 녹취
+          ...(digits.length >= 4 ? [{ "analysis.customerPhone": { $regex: phoneTextPattern(digits) } }] : []),
           { fileName: { $regex: escapeRegex(q), $options: "i" } },
           { transcript: { $regex: escapeRegex(q), $options: "i" } },
           { "analysis.summary": { $regex: escapeRegex(q), $options: "i" } },
@@ -49,6 +54,8 @@ export async function GET(request: Request) {
   const calls = await VoiceCall.find(filter).sort({ createdAt: -1 }).limit(100).lean<VoiceCallRecord[]>();
   return NextResponse.json({
     calls: calls.map((call) => serializeVoiceCall(call, { withTranscript: false })),
+    // 블랙컨슈머로 등록된 번호의 녹취 — 녹취 id → 주의 표시
+    cautions: await callCautions(calls),
     storage: isDropboxConfigured() ? "dropbox" : "local",
   });
 }

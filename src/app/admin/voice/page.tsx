@@ -1,7 +1,15 @@
 import { AdminVoiceCalls } from "@/components/AdminVoiceCalls";
 
 // 음성 상담 분석 — 전화 녹음을 올리면 전사 → CS 티켓 양식으로 자동 정리 (TWC 대체 3단계).
-export default function AdminVoicePage() {
+// ?q=번호&call=녹취id(고객 조회에서 녹취를 눌렀을 때) 면 그 번호로 찾아 바로 연다.
+export default async function AdminVoicePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const { q, call } = await searchParams;
+  const initialQuery = typeof q === "string" ? q.slice(0, 50) : "";
+  const initialCallId = typeof call === "string" ? call.slice(0, 40) : "";
   return (
     <main className="admin-shell vc-shell">
       <section className="admin-header">
@@ -15,7 +23,7 @@ export default function AdminVoicePage() {
         </div>
       </section>
 
-      <AdminVoiceCalls />
+      <AdminVoiceCalls key={`${initialQuery}:${initialCallId}`} initialQuery={initialQuery} initialCallId={initialCallId} />
     </main>
   );
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/adminAuth";
+import { chatCautions } from "@/lib/blackConsumerServer";
 import {
   adminView,
   appendMessage,
@@ -31,8 +32,12 @@ export async function GET(request: Request, context: RouteContext) {
   if (chat.agentUnread) {
     await LiveChat.updateOne({ _id: chat._id }, { $set: { agentUnread: 0 } });
   }
-  const messages = await getMessagesAfter(chat._id, parseAfter(request));
-  return NextResponse.json({ chat: { ...adminView(chat), agentUnread: 0 }, messages });
+  const [messages, cautions] = await Promise.all([getMessagesAfter(chat._id, parseAfter(request)), chatCautions([chat])]);
+  return NextResponse.json({
+    chat: { ...adminView(chat), agentUnread: 0 },
+    messages,
+    caution: cautions[String(chat._id)] ?? null,
+  });
 }
 
 const patchSchema = z

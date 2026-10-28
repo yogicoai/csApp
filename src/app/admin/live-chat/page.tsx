@@ -3,13 +3,16 @@ import { LIVE_CHAT_HOURS_LABEL } from "@/lib/liveChatHours";
 import { TALK_VIA } from "@/lib/liveChatOptions";
 
 // ?via=talktalk(왼쪽 메뉴 [네이버 톡톡]) · ?via=web 이면 그 경로로 거른 채 연다. 메뉴로 거르기가 바뀌면 콘솔을 새로 그린다.
+// ?q=상담번호&chat=상담id(고객 조회에서 상담을 눌렀을 때) 면 그 상담번호로 찾아 바로 연다.
 export default async function AdminLiveChatPage({
   searchParams,
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const { via } = await searchParams;
+  const { via, q, chat } = await searchParams;
   const initialVia = via === TALK_VIA || via === "web" ? via : "";
+  const initialQuery = typeof q === "string" ? q.slice(0, 50) : "";
+  const initialChatId = typeof chat === "string" ? chat.slice(0, 40) : "";
   return (
     <main className="admin-shell lc-shell">
       <section className="lc-page-head">
@@ -23,7 +26,12 @@ export default async function AdminLiveChatPage({
           뒤 대화 아래 [답변 안내 문자]로 알려 주면 돼요.
         </p>
       </section>
-      <AdminLiveChat key={initialVia} initialVia={initialVia} />
+      <AdminLiveChat
+        key={`${initialVia}:${initialQuery}:${initialChatId}`}
+        initialVia={initialVia}
+        initialQuery={initialQuery}
+        initialChatId={initialChatId}
+      />
     </main>
   );
 }

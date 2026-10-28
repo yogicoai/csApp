@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/adminAuth";
+import { chatCautions } from "@/lib/blackConsumerServer";
 import { connectDB } from "@/lib/db";
 import { adminView, NOT_DELETED, type LiveChatRecord } from "@/lib/liveChat";
 import { isDayString, kstDayRange } from "@/lib/liveChatHours";
@@ -113,6 +114,8 @@ export async function GET(request: Request) {
     return NextResponse.json({
       mode: q ? "search" : "list",
       chats: chats.map(adminView),
+      // 블랙컨슈머로 등록된 고객의 상담 — 상담 id → 주의 표시
+      cautions: await chatCautions(chats),
       counts,
       talkConnected: isNaverTalkConfigured(),
     });

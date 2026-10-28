@@ -1,4 +1,5 @@
 import { Cafe24ApiError, cafe24Request } from "@/lib/cafe24/api";
+import { formatPhone, phoneDigits } from "@/lib/phone";
 
 // yogiChat 의 services/cafe24Service.js 에서 배송문의에 필요한 부분만 이식.
 // (상품 카탈로그 동기화, 구매이력 등은 이 프로젝트 스코프 밖이라 제외)
@@ -36,6 +37,7 @@ type Cafe24Person = { name?: string; cellphone?: string; phone?: string };
 
 type Cafe24Order = {
   order_id: string;
+  member_id?: string;
   order_date?: string;
   order_place_name?: string;
   order_price_amount?: number | string;
@@ -292,4 +294,71 @@ export async function getOrderCandidate(orderId: string) {
 export async function getMemberOrderCandidates(memberId: string) {
   const orders = await getRecentOrders(memberId, 14);
   return attachShipments(orders.slice(0, CANDIDATE_LIMIT).map((order) => toCandidate(order, ["member"])));
+}
+
+// ── 고객 조회: 휴대폰 번호로 자사몰 회원·주문 찾기 ──
+
+// 휴대폰 번호로 회원 ID 찾기 — 회원 조회 권한(read_customer)이 없으면 null.
+// 번호 형식(하이픈 유무)을 받지 않으면(422) 다른 형식으로 한 번 더 묻는다.
+export async function findMemberIdsByPhone(digits: string): Promise<string[] | null> {
+  for (const cellphone of [formatPhone(digits), digits]) {
+    try {
+      const response = await cafe24Request<{ customers?: Array<{ member_id?: string; cellphone?: string }> }>(
+        "/api/v2/admin/customers",
+        { params: { shop_no: 1, cellphone } },
+      );
+      // 응답에 휴대폰이 있으면 한 번 더 맞춰 본다(다른 회원이 섞이지 않게).
+      return (response.customers ?? [])
+        .filter((customer) => !customer.cellphone || phoneDigits(customer.cellphone) === digits)
+        .map((customer) => customer.member_id ?? "")
+        .filter(Boolean);
+    } catch (error) {
+      if (error instanceof Cafe24ApiError && error.status === 403) return null;
+      if (!(error instanceof Cafe24ApiError && error.status === 422)) throw error;
+    }
+  }
+  return null;
+}
+
+// 휴대폰 번호로 주문 찾기(주문일 범위, 한 번에 3개월까지) — 주문자·받는 분 휴대폰 조건으로 묻고,
+// 받은 주문의 주문자·받는 분 번호가 실제로 같은 것만 남긴다(조건을 받지 않거나 무시해도 엉뚱한 주문이 섞이지 않게).
+// 두 조건을 모두 받지 않으면(422) null — 화면은 '전화번호로는 찾을 수 없음'으로 보여 준다.
+export async function searchOrdersByPhone(digits: string, from: string, to: string) {
+  const search = async (field: "buyer_cellphone" | "receiver_cellphone") => {
+    try {
+      const response = await cafe24Request<{ orders?: Cafe24Order[] }>("/api/v2/admin/orders", {
+        params: { shop_no: 1, [field]: formatPhone(digits), start_date: from, end_date: to, date_type: "order_date", limit: 100, embed: FULL_EMBED },
+      });
+      return response.orders ?? [];
+    } catch (error) {
+      if (error instanceof Cafe24ApiError && error.status === 422) return null;
+      throw error;
+    }
+  };
+  const [byBuyer, byReceiver] = await Promise.all([search("buyer_cellphone"), search("receiver_cellphone")]);
+  if (byBuyer === null && byReceiver === null) return null;
+
+  const samePhone = (person?: Cafe24Person) => [person?.cellphone, person?.phone].some((value) => phoneDigits(value) === digits);
+  const found = new Map<string, { order: Cafe24Order; matchedBy: OrderMatch[] }>();
+  for (const order of [...(byBuyer ?? []), ...(byReceiver ?? [])]) {
+    if (found.has(order.order_id)) continue;
+    const matchedBy: OrderMatch[] = [];
+    if (samePhone(order.buyer)) matchedBy.push("buyer");
+    if (order.receivers?.some(samePhone)) matchedBy.push("receiver");
+    if (matchedBy.length) found.set(order.order_id, { order, matchedBy });
+  }
+  const orders = Array.from(found.values()).sort((a, b) => (b.order.order_date ?? "").localeCompare(a.order.order_date ?? ""));
+  return {
+    orders: orders.map(({ order, matchedBy }) => toCandidate(order, matchedBy)),
+    memberIds: Array.from(new Set(orders.map(({ order }) => order.member_id ?? "").filter(Boolean))),
+  };
+}
+
+// 회원의 최근 주문(고객 조회용) — 배송 정보는 붙이지 않는다(합친 뒤 attachLookupShipments 로).
+export async function getMemberOrdersForLookup(memberId: string, days = 90) {
+  return (await getRecentOrders(memberId, days)).map((order) => toCandidate(order, ["member"]));
+}
+
+export function attachLookupShipments(candidates: OrderCandidate[]) {
+  return attachShipments(candidates);
 }
