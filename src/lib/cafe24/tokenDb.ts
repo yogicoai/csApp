@@ -1,8 +1,7 @@
 import mongoose from "mongoose";
 
-// cafe24 refresh_token 은 1회용(rotation) 이므로 yogiChat 과 같은 refresh_token 을
-// 다른 DB 에서 갱신하면 서로가 invalid_grant 를 유발한다.
-// 따라서 tokens 컬렉션만 yogiChat 의 DB 를 공유해서 단일 source of truth 를 유지한다.
+// cafe24 토큰은 adminChat·yChat 이 갱신해 공유 DB 의 tokens 컬렉션에 저장한다.
+// 이 앱은 그 컬렉션을 '읽기만' 한다(갱신·저장하지 않음 — refresh_token 이 1회용이라 충돌 방지).
 //
 // ⚠️ 중요: yogiChat 은 DB 이름을 URI 경로가 아니라 별도의 DB_NAME 환경변수로 지정한다
 //   ( client.db(DB_NAME) ). 그래서 URI 만으로 mongoose 연결을 만들면 엉뚱한 기본 DB 에
@@ -42,6 +41,12 @@ export async function connectTokenDB(): Promise<mongoose.Connection> {
 
   cached.promise ??= mongoose.createConnection(CAFE24_TOKEN_MONGODB_URI, options).asPromise();
 
-  cached.conn = await cached.promise;
+  try {
+    cached.conn = await cached.promise;
+  } catch (error) {
+    // 실패한 연결을 계속 들고 있으면 서버를 다시 켤 때까지 조회가 전부 실패하므로, 다음 요청에서 새로 연결한다.
+    cached.promise = null;
+    throw error;
+  }
   return cached.conn;
 }

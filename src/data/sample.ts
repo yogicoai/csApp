@@ -2,7 +2,7 @@ export const channels = {
   ownmall: {
     name: "자사몰",
     greeting: "안녕하세요. 자사몰 고객님을 위한 빠른 상담 가이드입니다.",
-    closingMessage: "도움이 더 필요하시면 카카오 상담 또는 대표번호로 이어서 도와드릴게요.",
+    closingMessage: "도움이 더 필요하시면 실시간 채팅상담 또는 대표번호로 이어서 도와드릴게요.",
     kakaoUrl: "https://pf.kakao.com/",
     phoneNumber: "1588-0000",
   },

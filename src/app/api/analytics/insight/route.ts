@@ -71,7 +71,7 @@ function summarizeContext(
 - 질문 열람 ${s.questionViews}
 - AI 직접 질문 ${s.aiQueries} (결과 없음 ${s.noResults})
 - 해결됐어요 ${s.resolved}
-- 상담 클릭 ${s.contactClicks} (카카오 ${s.kakaoClicks} / 전화 ${s.phoneClicks})
+- 상담 클릭 ${s.contactClicks} (실시간 상담 ${s.liveChatClicks} / 카카오 ${s.kakaoClicks} / 전화 ${s.phoneClicks})
 - 만족도 ${s.satisfactionRate}% (좋아요 ${s.feedbackPositive} / 아쉬워요 ${s.feedbackNegative})
 - 자가해결률 ${s.deflectionRate}% / 해결 전환율 ${s.resolutionRate}%
 

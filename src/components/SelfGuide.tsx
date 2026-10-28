@@ -20,9 +20,17 @@ import {
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DeliveryInquiry } from "@/components/DeliveryInquiry";
+import {
+  LiveChatButton,
+  LiveChatPanel,
+  rememberLiveChat,
+  useLiveChatClosure,
+  useLiveChatHoursOpen,
+} from "@/components/LiveChat";
 import { RichAnswer } from "@/components/RichAnswer";
 import { getSessionId } from "@/lib/session";
 import type { FaqItem } from "@/lib/sample-data";
+import { rememberVisitSource } from "@/lib/visitSource";
 
 // 자사몰(ownmall) 채널에서만 사용하는 가상 카테고리.
 // FAQ 목록에 존재하지 않으며, 카테고리 리스트 최상단에 강제 삽입되어
@@ -33,7 +41,6 @@ type ChannelCopy = {
   name: string;
   greeting: string;
   closingMessage: string;
-  kakaoUrl: string;
   phoneNumber: string;
 };
 
@@ -58,6 +65,11 @@ type AiAnswer = {
     category: string;
     subcategory?: string;
   }>;
+  // "delivery" 면 [주문번호로 배송 조회하기] 버튼을 보여준다(배송·주문 상태 질문)
+  action?: string;
+  // 상담사 휴가(연차·반차)로 지금 실시간 채팅상담이 닫혀 있는지와 다시 여는 때
+  chatClosed?: boolean;
+  reopenLabel?: string;
 };
 
 export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
@@ -67,6 +79,9 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
   const [query, setQuery] = useState("");
   const [aiAnswer, setAiAnswer] = useState<AiAnswer | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  // AI 답변 👍/👎(답변마다 한 번). 질문한 문장은 따로 기억해 피드백·상담 연결에 쓴다(입력창은 바뀔 수 있으므로).
+  const [aiFeedback, setAiFeedback] = useState<"positive" | "negative" | "">("");
+  const [aiAsked, setAiAsked] = useState("");
   const [feedback, setFeedback] = useState<"positive" | "negative" | "">("");
   const [resolved, setResolved] = useState(false);
   const [questionFilter, setQuestionFilter] = useState("");
@@ -76,6 +91,13 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
   // 배송문의 화면에서 "실시간 배송조회" CTA 를 눌렀을 때만 cafe24 조회 패널을 연다.
   // (기본은 일반 FAQ 목록을 그대로 노출)
   const [showDeliveryLookup, setShowDeliveryLookup] = useState(false);
+  // 화면 안의 실시간 채팅상담 버튼들이 대화창 하나를 공유하도록, 지금 열린 자리만 기억한다.
+  // header 는 단계를 옮겨도 유지되고, AI 답변 자리는 새로 질문하면 닫히며, 답변 자리는 FAQ 별로 구분된다.
+  const [liveChatSpot, setLiveChatSpot] = useState("");
+  const liveChatHoursOpen = useLiveChatHoursOpen();
+  const liveChatClosure = useLiveChatClosure();
+  // 지금 실시간 대화가 가능한지 — 아니면(운영시간 외·휴무) 버튼은 '문의 남기기'로 열린다. 확인 전에는 대화로 둔다.
+  const liveChatLive = liveChatHoursOpen !== false && !liveChatClosure?.closedNow;
   const aiAnswerRef = useRef<HTMLDivElement>(null);
   const loggedNoResultFilters = useRef<Set<string>>(new Set());
 
@@ -125,11 +147,25 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
   }
 
   useEffect(() => {
+    // 링크의 src 파라미터(전화 문자·카카오 메뉴 등)를 첫 방문 때 기억해 실시간 채팅상담 유입 경로로 쓴다.
+    rememberVisitSource();
     void fetch("/api/events", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ channel, sessionId: getSessionId(), eventType: "visit" }),
     });
+  }, [channel]);
+
+  // 답변 안내 문자 속 링크(?chat=id.token) — 그 대화를 이 브라우저에 보관해 바로 열고, 열쇠는 주소에서 지운다.
+  // 개발 모드에서 효과가 두 번 돌아도 열리도록 타이머는 정리하지 않는다(두 번째에는 주소에 열쇠가 없다).
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const match = (url.searchParams.get("chat") ?? "").match(/^([a-f0-9]{24})\.([A-Za-z0-9_-]{20,})$/);
+    if (!match) return;
+    rememberLiveChat(channel, match[1], match[2]);
+    url.searchParams.delete("chat");
+    window.history.replaceState(window.history.state, "", url.toString());
+    window.setTimeout(() => setLiveChatSpot("header"), 0);
   }, [channel]);
 
   // 자사몰 iframe embed 시 회원ID 를 받는 두 경로:
@@ -140,7 +176,10 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
     if (!isOwnmall || typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const mid = (params.get("mid") || params.get("memberId") || "").trim();
-    if (mid) setMemberId(mid);
+    if (!mid) return;
+    // 첫 페인트 뒤에 반영해 렌더 중 상태 변경을 피한다.
+    const timer = window.setTimeout(() => setMemberId(mid), 0);
+    return () => window.clearTimeout(timer);
   }, [isOwnmall]);
 
   useEffect(() => {
@@ -218,6 +257,21 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
 
     return () => window.clearTimeout(timer);
   }, [category, channel, displayedFaqs.length, questionFilter, subcategory, visibleFaqs.length]);
+
+  // 실시간 채팅상담 버튼 공통 속성 — 열린 자리 공유 + 사전 질문의 문의 유형 선택지(FAQ 카테고리).
+  function liveChatButtonProps(spot: string) {
+    return {
+      open: liveChatSpot === spot,
+      onOpenChange: (next: boolean) => setLiveChatSpot(next ? spot : ""),
+      inquiryTypes: categories,
+    };
+  }
+
+  function openHeaderLiveChat() {
+    if (liveChatSpot === "header") return;
+    logEvent("contact_click", { faqId: selectedFaq?.id, metadata: { method: "live_chat", from: "header" } });
+    setLiveChatSpot("header");
+  }
 
   function chooseCategory(nextCategory: string) {
     setCategory(nextCategory);
@@ -307,6 +361,32 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
     logEvent("resolved", { faqId: selectedFaq.id });
   }
 
+  // AI 답변 👍/👎 — 👎 는 어드민 상담 지표의 'AI 답변 보강' 목록으로 모인다.
+  function submitAiFeedback(helpful: boolean) {
+    if (!aiAnswer || aiFeedback) return;
+    setAiFeedback(helpful ? "positive" : "negative");
+    void fetch("/api/ai-feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        channel,
+        sessionId: getSessionId(),
+        query: aiAsked || query.trim(),
+        helpful,
+        status: aiAnswer.status,
+        answer: aiAnswer.answer,
+        sourceIds: aiAnswer.sources.map((source) => source.id),
+      }),
+    }).catch(() => {});
+  }
+
+  // 배송·주문 상태 질문 → 배송문의의 실시간 배송조회(주문번호)로 바로 이동
+  function openDeliveryLookup() {
+    chooseCategory(DELIVERY_CATEGORY);
+    setShowDeliveryLookup(true);
+    window.setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 50);
+  }
+
   async function askAi(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -316,6 +396,9 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
 
     setAiLoading(true);
     setAiAnswer(null);
+    setAiFeedback("");
+    setAiAsked(query.trim());
+    setLiveChatSpot((spot) => (spot === "header" ? spot : ""));
 
     try {
       const response = await fetch("/api/ai-query", {
@@ -362,7 +445,7 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
             continue;
           }
           const message = JSON.parse(raw) as
-            | { type: "meta"; status: AiAnswer["status"]; answer?: string; sources: AiAnswer["sources"]; suggestions: AiAnswer["suggestions"] }
+            | ({ type: "meta"; answer?: string } & Omit<AiAnswer, "answer">)
             | { type: "delta"; text: string }
             | { type: "done" };
 
@@ -372,6 +455,9 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
               answer: message.answer ?? "",
               sources: message.sources ?? [],
               suggestions: message.suggestions ?? [],
+              action: message.action ?? "",
+              chatClosed: Boolean(message.chatClosed),
+              reopenLabel: message.reopenLabel ?? "",
             });
             scrollToAnswer();
           } else if (message.type === "delta") {
@@ -392,6 +478,95 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
     } finally {
       setAiLoading(false);
     }
+  }
+
+  // AI 답변 카드 — 첫 화면(ai-start)과 질문 목록 화면(ai-question)이 같이 쓴다.
+  function renderAiAnswer(spot: "ai-start" | "ai-question") {
+    if (!aiAnswer) return null;
+    const chatClosed = Boolean(liveChatClosure?.closedNow) || Boolean(aiAnswer.chatClosed);
+    const reopenLabel = liveChatClosure?.nextOpenLabel || aiAnswer.reopenLabel || "다음 영업일";
+    const answerDone = !aiLoading && aiAnswer.answer.trim().length > 0;
+
+    return (
+      <div className={aiAnswer.status === "answered" ? "ai-answer" : "ai-answer needs-handoff"} ref={aiAnswerRef}>
+        <div className="ai-answer-head">
+          <Bot size={18} />
+          <strong>AI 답변</strong>
+        </div>
+        <RichAnswer text={aiAnswer.answer} />
+        {aiAnswer.action === "delivery" && isOwnmall && (
+          <button type="button" className="ai-delivery-button" onClick={openDeliveryLookup}>
+            <Truck size={16} />
+            주문번호로 배송 조회하기
+          </button>
+        )}
+        {aiAnswer.sources.length > 0 && (
+          <div className="source-list">
+            <strong>참고한 FAQ</strong>
+            {aiAnswer.sources.map((source) => (
+              <button key={source.id} onClick={() => chooseFaq(source.id)} type="button">
+                {source.subcategory && <span>{source.subcategory}</span>}
+                {source.question}
+              </button>
+            ))}
+          </div>
+        )}
+        {aiAnswer.suggestions.length > 0 && aiAnswer.sources.length === 0 && (
+          <div className="source-list">
+            <strong>가까운 질문</strong>
+            {aiAnswer.suggestions.map((suggestion) => (
+              <button key={suggestion.id} onClick={() => chooseFaq(suggestion.id)} type="button">
+                {suggestion.question}
+              </button>
+            ))}
+          </div>
+        )}
+        {aiAnswer.status !== "answered" && (
+          <div className="ai-contact-actions">
+            {chatClosed && (
+              // 상담사 휴무에는 실시간 대화가 닫혀 있고, 문의 접수(문자로 답변 안내)만 받는다.
+              <p className="ai-contact-closed">
+                실시간 채팅상담은 {reopenLabel}부터 열려요. 지금은 문의를 남기시면 문자로 답변 안내를 드려요.
+              </p>
+            )}
+            <LiveChatButton
+              channel={channel}
+              className="ai-contact-live"
+              entry={{ aiQuery: aiAsked || query.trim(), category: spot === "ai-question" ? category || undefined : undefined }}
+              memberId={memberId}
+              onOpen={() => logEvent("contact_click", { metadata: { method: "live_chat", from: "ai" } })}
+              {...liveChatButtonProps(spot)}
+            >
+              <MessageCircle size={16} />
+              {liveChatLive && !chatClosed ? "실시간 채팅상담으로 이어서 확인하기" : "문의 남기기"}
+            </LiveChatButton>
+            <a href={`tel:${channelCopy.phoneNumber}`} onClick={() => logEvent("contact_click", { metadata: { method: "phone" } })}>
+              <Phone size={15} />
+              {channelCopy.phoneNumber}
+            </a>
+          </div>
+        )}
+        {answerDone && (
+          <div className="ai-feedback-row" aria-label="AI 답변 만족도">
+            {aiFeedback ? (
+              <span className="ai-feedback-done">
+                <Check size={14} /> 의견 고마워요. 답변 개선에 반영할게요.
+              </span>
+            ) : (
+              <>
+                <span>이 답변이 도움이 됐나요?</span>
+                <button type="button" onClick={() => submitAiFeedback(true)}>
+                  <ThumbsUp size={14} /> 도움 됐어요
+                </button>
+                <button type="button" onClick={() => submitAiFeedback(false)}>
+                  <ThumbsDown size={14} /> 아쉬워요
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -420,8 +595,45 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
         <div className="guide-copy">
           <h1>{headerTitle}</h1>
           <p>{headerDescription}</p>
+          <button type="button" className="guide-live-chat-pill" onClick={openHeaderLiveChat}>
+            <MessageCircle size={14} />
+            실시간 채팅상담
+            {liveChatHoursOpen !== null && (
+              <span
+                className={
+                  liveChatHoursOpen && !liveChatClosure?.closedNow ? "guide-live-chat-state is-on" : "guide-live-chat-state"
+                }
+              >
+                {liveChatClosure?.closedNow
+                  ? liveChatClosure.type === "am"
+                    ? "14시부터 상담"
+                    : liveChatClosure.type === "pm"
+                      ? "오늘 상담 종료"
+                      : "오늘 휴무"
+                  : liveChatHoursOpen
+                    ? "상담 가능"
+                    : "운영시간 외"}
+              </span>
+            )}
+          </button>
         </div>
       </section>
+
+      {liveChatSpot === "header" && (
+        <section className="guide-live-chat" aria-label="실시간 채팅상담">
+          <LiveChatPanel
+            channel={channel}
+            entry={
+              selectedFaq
+                ? { faqId: selectedFaq.id, faqQuestion: selectedFaq.question, category: selectedFaq.category }
+                : { aiQuery: query.trim() || undefined, category: category || undefined }
+            }
+            memberId={memberId}
+            inquiryTypes={categories}
+            onClose={() => setLiveChatSpot("")}
+          />
+        </section>
+      )}
 
       <section className="mobile-step-view" aria-label="FAQ 탐색 단계">
         {currentStep !== "category" && (
@@ -454,50 +666,7 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
                   {aiLoading ? <Loader2 size={18} className="spin-icon" /> : <Send size={18} />}
                 </button>
               </form>
-              {aiAnswer && (
-                <div
-                  className={aiAnswer.status === "answered" ? "ai-answer" : "ai-answer needs-handoff"}
-                  ref={aiAnswerRef}
-                >
-                  <div className="ai-answer-head">
-                    <Bot size={18} />
-                    <strong>AI 답변</strong>
-                  </div>
-                  <RichAnswer text={aiAnswer.answer} />
-                  {aiAnswer.sources.length > 0 && (
-                    <div className="source-list">
-                      <strong>참고한 FAQ</strong>
-                      {aiAnswer.sources.map((source) => (
-                        <button key={source.id} onClick={() => chooseFaq(source.id)} type="button">
-                          {source.subcategory && <span>{source.subcategory}</span>}
-                          {source.question}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {aiAnswer.suggestions.length > 0 && aiAnswer.sources.length === 0 && (
-                    <div className="source-list">
-                      <strong>가까운 질문</strong>
-                      {aiAnswer.suggestions.map((suggestion) => (
-                        <button key={suggestion.id} onClick={() => chooseFaq(suggestion.id)} type="button">
-                          {suggestion.question}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {aiAnswer.status !== "answered" && (
-                    <div className="ai-contact-actions">
-                      <a href={channelCopy.kakaoUrl} onClick={() => logEvent("contact_click", { metadata: { method: "kakao" } })}>
-                        상담톡에서 이어서 확인하기
-                      </a>
-                      <a href={`tel:${channelCopy.phoneNumber}`} onClick={() => logEvent("contact_click", { metadata: { method: "phone" } })}>
-                        <Phone size={15} />
-                        {channelCopy.phoneNumber}
-                      </a>
-                    </div>
-                  )}
-                </div>
-              )}
+              {renderAiAnswer("ai-start")}
             </div>
 
             <div className="browse-block">
@@ -635,50 +804,7 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
                     AI에게 직접 질문하기
                   </button>
                 </form>
-                {aiAnswer && (
-                  <div
-                    className={aiAnswer.status === "answered" ? "ai-answer" : "ai-answer needs-handoff"}
-                    ref={aiAnswerRef}
-                  >
-                    <div className="ai-answer-head">
-                      <Bot size={18} />
-                      <strong>AI 답변</strong>
-                    </div>
-                    <RichAnswer text={aiAnswer.answer} />
-                    {aiAnswer.sources.length > 0 && (
-                      <div className="source-list">
-                        <strong>참고한 FAQ</strong>
-                        {aiAnswer.sources.map((source) => (
-                          <button key={source.id} onClick={() => chooseFaq(source.id)} type="button">
-                            {source.subcategory && <span>{source.subcategory}</span>}
-                            {source.question}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {aiAnswer.suggestions.length > 0 && aiAnswer.sources.length === 0 && (
-                      <div className="source-list">
-                        <strong>가까운 질문</strong>
-                        {aiAnswer.suggestions.map((suggestion) => (
-                          <button key={suggestion.id} onClick={() => chooseFaq(suggestion.id)} type="button">
-                            {suggestion.question}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {aiAnswer.status !== "answered" && (
-                      <div className="ai-contact-actions">
-                        <a href={channelCopy.kakaoUrl} onClick={() => logEvent("contact_click", { metadata: { method: "kakao" } })}>
-                          상담톡에서 이어서 확인하기
-                        </a>
-                        <a href={`tel:${channelCopy.phoneNumber}`} onClick={() => logEvent("contact_click", { metadata: { method: "phone" } })}>
-                          <Phone size={15} />
-                          {channelCopy.phoneNumber}
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {renderAiAnswer("ai-question")}
               </div>
             </>
           ) : (
@@ -745,18 +871,25 @@ export function SelfGuide({ channel, channelCopy, faqs }: SelfGuideProps) {
                   </span>
                   <div className="contact-head-copy">
                     <strong>아직 궁금한 점이 있으신가요?</strong>
-                    <span>채팅으로 남겨주시면 상담원이 순서대로 답변드려요.</span>
+                    <span>
+                      {liveChatLive
+                        ? "채팅으로 남겨주시면 상담원이 순서대로 답변드려요."
+                        : "지금은 운영시간 외라 문의를 남겨 주시면 문자로 답변 안내를 드려요."}
+                    </span>
                   </div>
                 </div>
                 <div className="contact-actions">
-                  <a
-                    className="contact-cta contact-cta-primary"
-                    href={channelCopy.kakaoUrl}
-                    onClick={() => logEvent("contact_click", { metadata: { method: "kakao" } })}
+                  <LiveChatButton
+                    channel={channel}
+                    className="contact-cta contact-cta-live"
+                    entry={{ faqId: selectedFaq.id, faqQuestion: selectedFaq.question, category: selectedFaq.category }}
+                    memberId={memberId}
+                    onOpen={() => logEvent("contact_click", { faqId: selectedFaq?.id, metadata: { method: "live_chat", from: "answer" } })}
+                    {...liveChatButtonProps(`answer:${selectedFaq.id}`)}
                   >
                     <MessageCircle size={18} />
-                    카카오톡으로 문의하기
-                  </a>
+                    {liveChatLive ? "실시간 채팅상담으로 문의하기" : "문의 남기기"}
+                  </LiveChatButton>
                   <a
                     className="contact-cta contact-cta-ghost"
                     href={`tel:${channelCopy.phoneNumber}`}

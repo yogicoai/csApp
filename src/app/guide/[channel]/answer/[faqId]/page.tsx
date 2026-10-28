@@ -68,7 +68,8 @@ export default async function AnswerPage({ params }: AnswerPageProps) {
         <AnswerActions
           channel={channel}
           faqId={faq.id}
-          kakaoUrl={channelCopy.kakaoUrl}
+          faqQuestion={faq.question}
+          faqCategory={faq.category}
           phoneNumber={channelCopy.phoneNumber}
         />
       </section>

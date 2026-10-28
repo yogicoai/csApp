@@ -7,6 +7,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  ThumbsDown,
   ThumbsUp,
   TrendingUp,
   Users,
@@ -34,6 +35,7 @@ type Analytics = {
     sessions: number;
     questionViews: number;
     contactClicks: number;
+    liveChatClicks: number;
     kakaoClicks: number;
     phoneClicks: number;
     aiQueries: number;
@@ -44,10 +46,15 @@ type Analytics = {
     satisfactionRate: number;
     deflectionRate: number;
     resolutionRate: number;
+    aiAnswerRate: number;
+    aiFeedbackPositive: number;
+    aiFeedbackNegative: number;
+    aiSatisfactionRate: number;
   };
   trend: TrendBucket[];
   topQuestions: Array<{ faqId: string; question: string; category: string; views: number }>;
   topNoResults: Array<{ query: string; count: number }>;
+  aiNegative: Array<{ query: string; answer: string; status: string; createdAt: string }>;
   topSearchKeywords: Array<{ query: string; count: number }>;
   byChannel: Array<{ channel: string; visits: number; contactClicks: number; satisfactionRate: number }>;
 };
@@ -118,7 +125,9 @@ export function EngagementDashboard({ faqCount }: { faqCount: number }) {
   }, [groupBy, from, to]);
 
   useEffect(() => {
-    void loadAnalytics();
+    // 첫 로드는 다음 틱으로 미뤄 렌더 중 상태 변경을 피한다.
+    const timer = window.setTimeout(() => void loadAnalytics(), 0);
+    return () => window.clearTimeout(timer);
   }, [loadAnalytics]);
 
   const summary = data?.summary;
@@ -130,8 +139,15 @@ export function EngagementDashboard({ faqCount }: { faqCount: number }) {
     { label: "세션", value: summary ? String(summary.sessions) : "—", icon: Users, hint: `방문 ${summary?.visits ?? 0}` },
     { label: "자가해결률", value: summary ? `${summary.deflectionRate}%` : "—", icon: ShieldCheck, hint: "세션 중 상담 미연결" },
     { label: "해결 전환율", value: summary ? `${summary.resolutionRate}%` : "—", icon: ThumbsUp, hint: `'해결됐어요' ${summary?.resolved ?? 0}회` },
-    { label: "전화 클릭", value: summary ? String(summary.phoneClicks) : "—", icon: PhoneCall, hint: `카카오 ${summary?.kakaoClicks ?? 0}` },
-    { label: "AI 직접질문", value: summary ? String(summary.aiQueries) : "—", icon: Sparkles, hint: `검색 실패 ${summary?.noResults ?? 0}` },
+    { label: "전화 클릭", value: summary ? String(summary.phoneClicks) : "—", icon: PhoneCall, hint: `실시간 상담 ${summary?.liveChatClicks ?? 0} · 카카오 ${summary?.kakaoClicks ?? 0}` },
+    {
+      label: "AI 직접질문",
+      value: summary ? String(summary.aiQueries + summary.noResults) : "—",
+      icon: Sparkles,
+      hint: summary
+        ? `답변 ${summary.aiAnswerRate}% · 👍 ${summary.aiFeedbackPositive} 👎 ${summary.aiFeedbackNegative}`
+        : "답변률·만족도",
+    },
   ];
 
   return (
@@ -245,6 +261,34 @@ export function EngagementDashboard({ faqCount }: { faqCount: number }) {
                 <p className="empty-state">열람 기록이 없습니다.</p>
               )}
             </div>
+          </div>
+
+          <div className="dashboard-panel ai-negative-panel">
+            <h3>
+              <ThumbsDown size={16} /> 아쉬워요 받은 AI 답변 <small>FAQ 보강 대상 · 최근 20건</small>
+              {summary && summary.aiFeedbackPositive + summary.aiFeedbackNegative > 0 && (
+                <span className="ai-negative-rate">AI 답변 만족도 {summary.aiSatisfactionRate}%</span>
+              )}
+            </h3>
+            {data && data.aiNegative.length > 0 ? (
+              <ul className="ai-negative-list">
+                {data.aiNegative.map((item, index) => (
+                  <li key={`${item.createdAt}-${index}`}>
+                    <div className="ai-negative-top">
+                      <strong>{item.query}</strong>
+                      <span>
+                        {item.createdAt
+                          ? new Date(item.createdAt).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+                          : ""}
+                      </span>
+                    </div>
+                    {item.answer && <p>{item.answer}</p>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty-state">아직 👎 받은 AI 답변이 없어요.</p>
+            )}
           </div>
 
         </>

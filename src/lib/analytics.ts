@@ -23,6 +23,7 @@ export type EngagementAnalytics = {
     sessions: number;
     questionViews: number;
     contactClicks: number;
+    liveChatClicks: number;
     kakaoClicks: number;
     phoneClicks: number;
     aiQueries: number;
@@ -33,10 +34,17 @@ export type EngagementAnalytics = {
     satisfactionRate: number;
     deflectionRate: number;
     resolutionRate: number;
+    // 'AI에게 바로 질문하기' — 답변률(FAQ로 답한 비율)과 답변 👍/👎
+    aiAnswerRate: number;
+    aiFeedbackPositive: number;
+    aiFeedbackNegative: number;
+    aiSatisfactionRate: number;
   };
   trend: TrendBucket[];
   topQuestions: Array<{ faqId: string; question: string; category: string; views: number }>;
   topNoResults: Array<{ query: string; count: number }>;
+  // 👎 받은 AI 답변 — FAQ 보강 대상
+  aiNegative: Array<{ query: string; answer: string; status: string; createdAt: string }>;
   topSearchKeywords: Array<{ query: string; count: number }>;
   byChannel: Array<{ channel: string; visits: number; contactClicks: number; satisfactionRate: number }>;
 };
@@ -139,6 +147,7 @@ export function emptyAnalytics(groupBy: GroupBy, since: Date, until: Date): Enga
       sessions: 0,
       questionViews: 0,
       contactClicks: 0,
+      liveChatClicks: 0,
       kakaoClicks: 0,
       phoneClicks: 0,
       aiQueries: 0,
@@ -149,10 +158,15 @@ export function emptyAnalytics(groupBy: GroupBy, since: Date, until: Date): Enga
       satisfactionRate: 0,
       deflectionRate: 0,
       resolutionRate: 0,
+      aiAnswerRate: 0,
+      aiFeedbackPositive: 0,
+      aiFeedbackNegative: 0,
+      aiSatisfactionRate: 0,
     },
     trend: [],
     topQuestions: [],
     topNoResults: [],
+    aiNegative: [],
     topSearchKeywords: [],
     byChannel: [],
   };
@@ -177,7 +191,7 @@ export async function getEngagementAnalytics(options: {
     match.channel = channel;
   }
 
-  const [bucketRows, channelRows, topQuestionRows, queryRows, sessionRows, contactRows] = await Promise.all([
+  const [bucketRows, channelRows, topQuestionRows, queryRows, sessionRows, contactRows, aiNegativeRows] = await Promise.all([
     EventLog.aggregate([
       { $match: match },
       {
@@ -221,6 +235,11 @@ export async function getEngagementAnalytics(options: {
       { $match: { ...match, eventType: "contact_click" } },
       { $group: { _id: "$metadata.method", count: { $sum: 1 } } },
     ]),
+    EventLog.find({ ...match, eventType: "ai_feedback_negative" })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .select("query metadata createdAt")
+      .lean(),
   ]);
 
   const trendMap = new Map<string, TrendBucket>();
@@ -250,6 +269,20 @@ export async function getEngagementAnalytics(options: {
   const feedbackNegative = summaryTotals.feedback_negative ?? 0;
   const totalFeedback = feedbackPositive + feedbackNegative;
   const satisfactionRate = totalFeedback ? clampRate((feedbackPositive / totalFeedback) * 100) : 0;
+  const aiFeedbackPositive = summaryTotals.ai_feedback_positive ?? 0;
+  const aiFeedbackNegative = summaryTotals.ai_feedback_negative ?? 0;
+  const aiFeedbackTotal = aiFeedbackPositive + aiFeedbackNegative;
+  const aiSatisfactionRate = aiFeedbackTotal ? clampRate((aiFeedbackPositive / aiFeedbackTotal) * 100) : 0;
+  // AI 질문 중 FAQ·응대 자산으로 답한 비율(나머지는 '미해결 검색어'로 기록됨)
+  const aiAnswerRate = aiQueries + noResults ? clampRate((aiQueries / (aiQueries + noResults)) * 100) : 0;
+  const aiNegative = (
+    aiNegativeRows as Array<{ query?: string; metadata?: { answer?: string; status?: string }; createdAt?: Date }>
+  ).map((row) => ({
+    query: row.query ?? "",
+    answer: row.metadata?.answer ?? "",
+    status: row.metadata?.status ?? "",
+    createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : "",
+  }));
 
   const sessionAgg = (sessionRows as Array<{ sessions: number; resolvedSessions: number; contactSessions: number }>)[0];
   const sessions = sessionAgg?.sessions ?? 0;
@@ -264,10 +297,13 @@ export async function getEngagementAnalytics(options: {
       : 0;
   const resolutionRate = sessions ? clampRate((resolvedSessions / sessions) * 100) : 0;
 
+  // 카카오 상담은 실시간 상담으로 교체됨 — kakao 는 교체 전 기간 집계용으로 남겨 둔다.
+  let liveChatClicks = 0;
   let kakaoClicks = 0;
   let phoneClicks = 0;
   for (const row of contactRows as Array<{ _id: string | null; count: number }>) {
-    if (row._id === "kakao") kakaoClicks += row.count;
+    if (row._id === "live_chat") liveChatClicks += row.count;
+    else if (row._id === "kakao") kakaoClicks += row.count;
     else if (row._id === "phone") phoneClicks += row.count;
   }
 
@@ -325,6 +361,7 @@ export async function getEngagementAnalytics(options: {
       sessions,
       questionViews,
       contactClicks,
+      liveChatClicks,
       kakaoClicks,
       phoneClicks,
       aiQueries,
@@ -335,10 +372,15 @@ export async function getEngagementAnalytics(options: {
       satisfactionRate,
       deflectionRate,
       resolutionRate,
+      aiAnswerRate,
+      aiFeedbackPositive,
+      aiFeedbackNegative,
+      aiSatisfactionRate,
     },
     trend,
     topQuestions,
     topNoResults: rankQueries(noResultQueries),
+    aiNegative,
     topSearchKeywords: rankQueries(allQueries),
     byChannel,
   };

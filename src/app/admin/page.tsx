@@ -1,41 +1,33 @@
-import Link from "next/link";
-import { BookOpen } from "lucide-react";
-import { AdminFaqManager } from "@/components/AdminFaqManager";
 import { AdminInsightButton } from "@/components/AdminInsightButton";
-import { AdminPasswordButton } from "@/components/AdminPasswordButton";
+import { BoardStats } from "@/components/BoardStats";
 import { UnansweredBadge } from "@/components/UnansweredBadge";
-import { ClaimManager } from "@/components/ClaimManager";
 import { EngagementDashboard } from "@/components/EngagementDashboard";
-import { getAllClaims } from "@/lib/repositories/claimRepository";
+import { WeeklyReport } from "@/components/WeeklyReport";
 import { getAdminFaqs } from "@/lib/repositories/faqRepository";
 
+// 상담 지표 — 셀프가이드 사용량과 상담 전환 흐름을 한눈에 본다.
 export default async function AdminPage() {
-  const [faqs, claims] = await Promise.all([getAdminFaqs(), getAllClaims()]);
-  const liveClaims = claims.filter((claim) => claim.status === "live" && claim.answer);
+  const faqs = await getAdminFaqs();
 
   return (
     <main className="admin-shell">
       <section className="admin-header">
         <div>
-          <p className="eyebrow">Admin</p>
-          <h1>상담 지표 운영관리</h1>
+          <p className="eyebrow">CS Center</p>
+          <h1>상담 지표</h1>
+          <p className="admin-header-desc">고객이 셀프가이드에서 얼마나 해결했고, 어디서 상담으로 넘어오는지 봅니다.</p>
         </div>
         <div className="admin-header-actions">
           <UnansweredBadge />
-          <Link href="/admin/guide" className="guide-link">
-            <BookOpen size={16} />
-            사용 가이드
-          </Link>
           <AdminInsightButton />
-          <AdminPasswordButton />
         </div>
       </section>
 
+      <WeeklyReport />
+
+      <BoardStats />
+
       <EngagementDashboard faqCount={faqs.length} />
-
-      <AdminFaqManager initialFaqs={faqs} initialLiveClaims={liveClaims} />
-
-      <ClaimManager initialClaims={claims} />
     </main>
   );
 }

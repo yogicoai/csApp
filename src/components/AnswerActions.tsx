@@ -2,25 +2,30 @@
 
 import { Check, Headphones, MessageCircle, Phone, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useEffect, useState } from "react";
+import { LiveChatButton } from "@/components/LiveChat";
 import { getSessionId } from "@/lib/session";
+import { rememberVisitSource } from "@/lib/visitSource";
 
 type AnswerActionsProps = {
   channel: string;
   faqId: string;
-  kakaoUrl: string;
+  faqQuestion: string;
+  faqCategory: string;
   phoneNumber: string;
 };
 
 export function AnswerActions({
   channel,
   faqId,
-  kakaoUrl,
+  faqQuestion,
+  faqCategory,
   phoneNumber,
 }: AnswerActionsProps) {
   const [feedback, setFeedback] = useState<"positive" | "negative" | "">("");
   const [resolved, setResolved] = useState(false);
 
   useEffect(() => {
+    rememberVisitSource();
     void fetch("/api/events", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -28,7 +33,7 @@ export function AnswerActions({
     });
   }, [channel, faqId]);
 
-  function logContact(method: "kakao" | "phone") {
+  function logContact(method: "live_chat" | "phone") {
     void fetch("/api/events", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -107,10 +112,15 @@ export function AnswerActions({
           </div>
         </div>
         <div className="contact-actions">
-          <a className="contact-cta contact-cta-primary" href={kakaoUrl} onClick={() => logContact("kakao")}>
+          <LiveChatButton
+            channel={channel}
+            className="contact-cta contact-cta-live"
+            entry={{ faqId, faqQuestion, category: faqCategory }}
+            onOpen={() => logContact("live_chat")}
+          >
             <MessageCircle size={18} />
-            카카오톡으로 문의하기
-          </a>
+            실시간 채팅상담으로 문의하기
+          </LiveChatButton>
           <a className="contact-cta contact-cta-ghost" href={`tel:${phoneNumber}`} onClick={() => logContact("phone")}>
             <Phone size={15} />
             전화 상담 {phoneNumber}

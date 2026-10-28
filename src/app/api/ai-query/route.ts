@@ -2,13 +2,25 @@ import { z } from "zod";
 import { connectDB } from "@/lib/db";
 import { filterFaqsByChannel } from "@/lib/faqVisibility";
 import { isBlockedIp } from "@/lib/ipBlock";
+import { todayClosureState } from "@/lib/liveChatClosures";
+import { isLiveChatOpen } from "@/lib/liveChatHours";
+import { maskPersonalInfo } from "@/lib/pii";
 import { getLiveClaims, type ClaimItem } from "@/lib/repositories/claimRepository";
 import { getPublishedFaqs } from "@/lib/repositories/faqRepository";
 import { EventLog } from "@/models/EventLog";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // 고객 답변은 응답 속도·비용이 중요하므로 가벼운 Claude 모델(Haiku)로 근거 기반 짧게 재서술.
-const ANSWER_MODEL = process.env.ANTHROPIC_ANSWER_MODEL ?? "claude-haiku-4-5";
+const ANSWER_MODEL = process.env.ANTHROPIC_ANSWER_MODEL ?? "claude-haiku-5-5";
+// Haiku 5.5 는 사고(thinking)가 기본으로 켜져 있고 사고 토큰도 max_tokens 에 들어간다.
+// 짧은 답이라도 여유를 두고, effort 는 low 로 빠르게(간단한 질문은 사고를 건너뛴다).
+// effort 는 Haiku 4.5 에서는 400 이라, 환경변수로 4.5 를 지정한 경우에는 보내지 않는다.
+const ANSWER_MAX_TOKENS = 1024;
+const ANSWER_SUPPORTS_EFFORT = !ANSWER_MODEL.includes("haiku-4");
+
+// 배송·주문 상태 질문 — 자사몰은 셀프가이드의 실시간 배송조회(주문번호)로 바로 이어 준다(전화 문의 1위 유형).
+const DELIVERY_INTENT =
+  /(배송|택배|송장|운송장|출고|발송|도착|언제\s*(?:와|오|받|도착)|주문\s*(?:확인|내역|조회|상태)|내\s*주문)/;
 
 // 고객 대면 엔드포인트 레이트 리밋 (IP당 1분 N회) — 남용/비용 폭주 방지.
 // 주의: 인메모리라 단일 인스턴스 기준. 다중 인스턴스 배포면 Redis/DB로 승격 권장.
@@ -205,22 +217,45 @@ function scoreFaq(
   return score;
 }
 
-function assessHandoffNeed(query: string, bestFaq?: Awaited<ReturnType<typeof getPublishedFaqs>>[number]) {
+// 지금 실시간 채팅상담에 연결할 수 있는지 — 상담사 휴가(연차·반차)로 닫혔는지, 운영시간 외인지에 따라 안내가 달라진다.
+type ContactState = { closed: boolean; reopenLabel: string; hoursOpen: boolean };
+
+function contactTail(state: ContactState, kind: "required" | "recommended" | "none") {
+  // 운영시간 외·휴무에는 실시간 대화 대신 문의 접수(휴대폰으로 답변 안내)로 받는다.
+  if (state.closed) {
+    return kind === "recommended"
+      ? `사진 확인이나 접수가 필요하면 문의를 남겨 주세요. 오늘은 고객센터 휴무라 ${state.reopenLabel}부터 순서대로 확인해 문자로 답변 안내를 드려요.`
+      : `오늘은 고객센터 휴무라 실시간 채팅상담이 닫혀 있어요. 문의를 남겨 주시면 ${state.reopenLabel}부터 순서대로 확인해 문자로 답변 안내를 드려요.`;
+  }
+  if (!state.hoursOpen) {
+    return kind === "recommended"
+      ? "사진 확인이나 접수가 필요하면 문의를 남겨 주세요. 다음 영업일에 순서대로 확인해 문자로 답변 안내를 드려요."
+      : "지금은 상담 운영시간이 아니라 실시간 대화 대신 문의를 접수해요. 남겨 주시면 다음 영업일에 순서대로 확인해 문자로 답변 안내를 드려요.";
+  }
+  if (kind === "recommended") return "사진 확인이나 접수가 필요하면 실시간 채팅상담으로 이어가 주세요.";
+  return kind === "required"
+    ? "아래 버튼을 눌러 실시간 채팅상담으로 이어가 주세요."
+    : "실시간 채팅상담으로 문의 내용을 남겨주시면 더 정확히 확인해 드릴게요.";
+}
+
+function assessHandoffNeed(
+  query: string,
+  contact: ContactState,
+  bestFaq?: Awaited<ReturnType<typeof getPublishedFaqs>>[number],
+) {
   const source = `${query} ${bestFaq?.question ?? ""}`;
 
   if (/사진|영상|기사|방문|하자\s*확인|불량\s*확인|제품\s*상태|접수하고|신청하고|A\/S\s*접수/i.test(source)) {
     return {
       level: "required" as const,
-      message:
-        "상담톡에서 확인이 필요한 문의입니다.\n\n정확한 확인을 위해 아래 정보를 준비해 주세요.\n- 구매처\n- 주문번호\n- 제품명\n- 증상 사진\n- 문의 내용\n\n아래 버튼을 눌러 상담톡으로 이어가 주세요.",
+      message: `실시간 채팅상담에서 확인이 필요한 문의입니다.\n\n정확한 확인을 위해 아래 정보를 준비해 주세요.\n- 구매처\n- 주문번호\n- 제품명\n- 증상 사진\n- 문의 내용\n\n${contactTail(contact, "required")}`,
     };
   }
 
   if (/불량|하자|손상|터짐|찢|가루|변색|오염|이염|냄새|보증|환불|교환/.test(source)) {
     return {
       level: "recommended" as const,
-      message:
-        "제품 상태에 따라 안내가 달라질 수 있어요.\n\n아래 FAQ를 먼저 확인하시고, 사진 확인이나 접수가 필요하면 상담톡으로 이어가 주세요.",
+      message: `제품 상태에 따라 안내가 달라질 수 있어요.\n\n아래 FAQ를 먼저 확인하시고, ${contactTail(contact, "recommended")}`,
     };
   }
 
@@ -329,11 +364,16 @@ function buildGroundingContext(rankedFaqs: Array<{ faq: Awaited<ReturnType<typeo
 const ANSWER_INSTRUCTIONS =
   "당신은 Yogibo 고객센터 FAQ 안내 AI입니다. 반드시 제공된 FAQ 근거와 고객 사례 응대 안에서만 한국어로 답변하세요. 근거에 없는 내용은 추측하지 말고 상담 연결을 안내하세요. 서로 충돌하면 가장 직접적으로 관련된 근거를 우선하고, 불확실하면 단정하지 마세요. 가격, 일정, 정책은 근거에 적힌 내용만 말하세요. URL이 있으면 새로 만들거나 바꾸지 말고 원문 URL만 유지하세요. 핵심만 3문장 이내로, 군더더기 없이 친절하게 답하세요.";
 
-// Claude(Anthropic) 스트리밍을 받아 텍스트 델타를 콜백으로 흘려보낸다. 토큰이 하나라도 오면 true.
-// 실패하면 false → 호출부에서 원본 FAQ 답변으로 폴백한다.
-async function streamGroundedAnswer(query: string, grounding: string, onDelta: (text: string) => void) {
+// Claude(Anthropic) 스트리밍을 받아 텍스트 델타를 콜백으로 흘려보낸다.
+// got: 답변 글자가 하나라도 왔는지 / stopReason: 끝난 이유(refusal 이면 안전 분류기가 거절 — Haiku 5.5 는 서버 대체 모델 없음).
+// 글자가 하나도 안 오면(실패·거절·사고만 하다 토큰 소진) 호출부에서 원본 FAQ 답변으로 폴백한다.
+async function streamGroundedAnswer(
+  query: string,
+  grounding: string,
+  onDelta: (text: string) => void,
+): Promise<{ got: boolean; stopReason: string | null }> {
   if (!ANTHROPIC_API_KEY) {
-    return false;
+    return { got: false, stopReason: null };
   }
 
   try {
@@ -346,7 +386,8 @@ async function streamGroundedAnswer(query: string, grounding: string, onDelta: (
       },
       body: JSON.stringify({
         model: ANSWER_MODEL,
-        max_tokens: 300,
+        max_tokens: ANSWER_MAX_TOKENS,
+        ...(ANSWER_SUPPORTS_EFFORT ? { output_config: { effort: "low" } } : {}),
         system: ANSWER_INSTRUCTIONS,
         stream: true,
         messages: [
@@ -365,13 +406,14 @@ ${grounding}
     });
 
     if (!response.ok || !response.body) {
-      return false;
+      return { got: false, stopReason: null };
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let got = false;
+    let stopReason: string | null = null;
 
     for (;;) {
       const { done, value } = await reader.read();
@@ -393,9 +435,9 @@ ${grounding}
         try {
           const event = JSON.parse(data) as {
             type?: string;
-            delta?: { type?: string; text?: string };
+            delta?: { type?: string; text?: string; stop_reason?: string };
           };
-          // Claude 스트림: content_block_delta → delta.text_delta 의 text
+          // Claude 스트림: content_block_delta → delta.text_delta 의 text (thinking 델타는 건너뛴다)
           if (
             event.type === "content_block_delta" &&
             event.delta?.type === "text_delta" &&
@@ -404,15 +446,19 @@ ${grounding}
             onDelta(event.delta.text);
             got = true;
           }
+          // 끝난 이유는 message_delta 에 실려 온다(end_turn / max_tokens / refusal …)
+          if (event.type === "message_delta" && typeof event.delta?.stop_reason === "string") {
+            stopReason = event.delta.stop_reason;
+          }
         } catch {
           // 불완전한 SSE 조각은 건너뛴다.
         }
       }
     }
 
-    return got;
+    return { got, stopReason };
   } catch {
-    return false;
+    return { got: false, stopReason: null };
   }
 }
 
@@ -459,16 +505,34 @@ export async function POST(request: Request) {
   const bestMatch = rankedFaqs[0];
   const hasConfidentFaq = Boolean(bestMatch && bestMatch.score >= 6);
   const hasConfidentAnswer = hasConfidentFaq || rankedClaims.length > 0;
-  const handoff = assessHandoffNeed(payload.query, bestMatch?.faq);
+
+  // 외부 AI 로 보내거나 통계에 남길 질문은 개인정보(전화·이메일·주소·주문번호 등)를 가린다.
+  // 검색(점수 계산)은 서버 안에서만 하므로 원문을 그대로 쓴다.
+  const maskedQuery = maskPersonalInfo(payload.query);
+
+  // 지금 실시간 채팅상담에 연결할 수 있는지 — 연차·반차로 닫혔으면 다시 여는 때를 안내한다.
+  const closure = await todayClosureState().catch(() => null);
+  const contact: ContactState = {
+    closed: Boolean(closure?.closedNow),
+    reopenLabel: closure?.nextOpenLabel ?? "다음 영업일",
+    hoursOpen: isLiveChatOpen(),
+  };
+  const handoff = assessHandoffNeed(payload.query, contact, bestMatch?.faq);
+
+  // 배송·주문 상태 질문이면 화면에 [주문번호로 배송 조회하기]를 같이 보여준다(자사몰만 배송조회가 있음).
+  const deliveryAction = payload.channel === "ownmall" && DELIVERY_INTENT.test(payload.query);
 
   // 차단 IP(회사 IP 등)는 답변은 정상 제공하되 통계 기록만 생략한다.
+  // 배송조회로 이어 준 질문은 '미해결'로 세지 않는다(답할 FAQ 가 없어도 해결 경로를 줬으므로).
   if (!isBlockedIp(ip)) {
-    await logAiQuery(payload, hasConfidentAnswer, {
+    await logAiQuery({ ...payload, query: maskedQuery }, hasConfidentAnswer || deliveryAction, {
       subcategory: payload.subcategory ?? "",
       matchedFaqIds: rankedFaqs.map((item) => item.faq.id),
       matchedClaimIds: rankedClaims.map((item) => item.claim.id),
       topScore: bestMatch?.score ?? 0,
       handoffLevel: handoff.level,
+      action: deliveryAction ? "delivery" : "",
+      chatClosed: contact.closed,
     });
   }
 
@@ -490,16 +554,29 @@ export async function POST(request: Request) {
   const line = (obj: unknown) => encoder.encode(`${JSON.stringify(obj)}\n`);
   const headers = { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" };
 
+  // 화면이 쓰는 부가 정보 — action: 배송조회 버튼, chatClosed: 실시간 상담 버튼 대신 다시 여는 때 표시
+  const extras = { action: deliveryAction ? "delivery" : "", chatClosed: contact.closed, reopenLabel: contact.reopenLabel };
+
+  // 배송 질문인데 답할 FAQ 가 없으면 상담 연결 대신 배송조회로 먼저 안내한다.
+  if (deliveryAction && !hasConfidentAnswer) {
+    const answer = `주문하신 상품의 배송 상황은 아래 [주문번호로 배송 조회하기]에서 바로 확인할 수 있어요.${
+      contact.closed ? "" : "\n\n조회가 안 되거나 더 궁금한 점이 있으면 실시간 채팅상담으로 문의해 주세요."
+    }`;
+    const body = line({ type: "meta", status: "answered_handoff", answer, sources: [], suggestions: suggestionList, ...extras });
+    return new Response(new Blob([body, line({ type: "done" })]).stream(), { headers });
+  }
+
   if (!hasConfidentAnswer || handoff.level === "required") {
     const answer = hasConfidentAnswer
       ? handoff.message
-      : "보유한 FAQ 안에서 확실한 답변을 찾지 못했습니다.\n\n상담톡에서 문의 내용을 남겨주시면 더 정확히 확인해 드릴게요.";
+      : `보유한 FAQ 안에서 확실한 답변을 찾지 못했습니다.\n\n${contactTail(contact, "none")}`;
     const body = line({
       type: "meta",
       status: "needs_handoff",
       answer,
       sources: handoff.level === "required" ? sourceList : [],
       suggestions: suggestionList,
+      ...extras,
     });
     return new Response(new Blob([body, line({ type: "done" })]).stream(), { headers });
   }
@@ -527,13 +604,17 @@ export async function POST(request: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       controller.enqueue(
-        line({ type: "meta", status, answer: prefix, sources: sourceList, suggestions: suggestionList.slice(1) }),
+        line({ type: "meta", status, answer: prefix, sources: sourceList, suggestions: suggestionList.slice(1), ...extras }),
       );
-      const got = await streamGroundedAnswer(payload.query, grounding, (text) =>
+      const result = await streamGroundedAnswer(maskedQuery, grounding, (text) =>
         controller.enqueue(line({ type: "delta", text })),
       );
-      if (!got && fallbackAnswer) {
+      // 글자가 하나도 안 왔으면(오류·거절·토큰 소진) 근거 원문을 그대로 보여준다.
+      if (!result.got && fallbackAnswer) {
         controller.enqueue(line({ type: "delta", text: fallbackAnswer }));
+      }
+      if (result.stopReason === "refusal") {
+        console.warn(`[ai-query] 모델이 답변을 거절했습니다(stop_reason=refusal)${result.got ? "" : " — 근거 원문으로 대체"}.`);
       }
       controller.enqueue(line({ type: "done" }));
       controller.close();

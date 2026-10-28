@@ -48,7 +48,7 @@ function ipv4ToInt(ip: string): number | null {
   return acc >>> 0;
 }
 
-function inCidr(ip: string, cidr: string): boolean {
+export function inCidr(ip: string, cidr: string): boolean {
   const [range, bitsStr] = cidr.split("/");
   const bits = Number(bitsStr);
   if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
