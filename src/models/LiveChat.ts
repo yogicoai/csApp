@@ -48,6 +48,8 @@ const liveChatSchema = new Schema(
       openUser: { type: String },
       productName: { type: String },
       productUrl: { type: String },
+      // 둘째 톡톡 계정으로 들어온 상담이면 "2"(lib/naverTalk 의 계정 key) — 첫 계정은 비어 있다.
+      account: { type: String },
     },
     // 운영시간 외·휴무 시간에 받은 상담 — 실시간 대화 대신 '문의 접수'로 받는다.
     offHours: { type: Boolean, default: false },

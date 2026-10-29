@@ -1,6 +1,8 @@
 // 게시판 관리 — 홈페이지(cafe24 게시판)와 스마트스토어(고객문의)의 글·답변을 한 모양으로 다룬다.
 // 화면(클라이언트)과 서버가 같이 쓰므로 서버 전용 모듈을 들이지 않는다.
 
+import { businessMs, WORK_HOURS_PER_DAY } from "@/lib/liveChatHours";
+
 export type BoardFolder = "homepage" | "smartstore";
 
 export type BoardAnswer = {
@@ -94,6 +96,7 @@ export type BoardSummary = {
   total: number;
   answered: number;
   open: number; // 답을 달아야 하는데 아직 없는 글
+  // 아래 두 시간은 근무시간(평일 10:00 ~ 17:30)만 센 값 — 밤·주말에 올라온 글이 실제보다 길게 잡히지 않게
   avgAnswerHours: number | null; // 글 → 첫 답변까지 평균
   oldestOpenHours: number | null; // 미답변 중 가장 오래 기다린 글
 };
@@ -109,10 +112,10 @@ const roundHours = (ms: number) => Math.round((ms / 3_600_000) * 10) / 10;
 export function summarizePosts(posts: BoardPost[], now = Date.now()): BoardSummary {
   const waits = posts
     .filter((post) => post.answered && post.answers[0]?.createdAt)
-    .map((post) => kstMs(post.answers[0].createdAt) - kstMs(post.createdAt))
-    .filter((ms) => Number.isFinite(ms) && ms >= 0);
+    .filter((post) => kstMs(post.answers[0].createdAt) >= kstMs(post.createdAt))
+    .map((post) => businessMs(kstMs(post.createdAt), kstMs(post.answers[0].createdAt)));
   const open = posts.filter(needsAnswer);
-  const oldest = open.map((post) => now - kstMs(post.createdAt)).filter(Number.isFinite);
+  const oldest = open.filter((post) => Number.isFinite(kstMs(post.createdAt))).map((post) => businessMs(kstMs(post.createdAt), now));
   return {
     total: posts.length,
     answered: posts.filter((post) => post.answered).length,
@@ -126,6 +129,12 @@ export function summarizePosts(posts: BoardPost[], now = Date.now()): BoardSumma
 export function formatHours(hours: number | null) {
   if (hours === null) return "—";
   return hours >= 48 ? `${Math.round((hours / 24) * 10) / 10}일` : `${hours}시간`;
+}
+
+// 근무시간 → "3.5시간" / "15시간(근무일 2일)" — 하루 7.5시간으로 근무일을 함께 보여 준다
+export function formatWorkHours(hours: number | null) {
+  if (hours === null) return "—";
+  return hours >= WORK_HOURS_PER_DAY ? `${hours}시간(근무일 ${Math.round((hours / WORK_HOURS_PER_DAY) * 10) / 10}일)` : `${hours}시간`;
 }
 
 const NAMED_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };

@@ -63,6 +63,25 @@ export function isWeekend(day: string) {
   return weekday === 0 || weekday === 6;
 }
 
+// 근무시간 하루 길이(시간) — 평일 10:00 ~ 17:30
+export const WORK_HOURS_PER_DAY = (CLOSE_MINUTES - OPEN_MINUTES) / 60;
+
+// 두 시각 사이에서 근무시간(평일 10:00 ~ 17:30, KST)에 든 길이(ms) — 밤·주말은 빼고 센다(공휴일은 아직 빼지 않는다).
+// 게시판 평균 답변 시간처럼 '글이 올라온 뒤'를 그대로 세면 퇴근 뒤·주말이 섞여 너무 길게 나오는 지표에 쓴다.
+export function businessMs(startMs: number, endMs: number) {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return 0;
+  const lastDay = kstDateString(new Date(endMs));
+  let total = 0;
+  for (let day = kstDateString(new Date(startMs)); day <= lastDay; day = shiftDay(day, 1)) {
+    if (isWeekend(day)) continue;
+    const midnight = Date.parse(`${day}T00:00:00Z`) - KST_OFFSET_MS;
+    const open = midnight + OPEN_MINUTES * 60_000;
+    const close = midnight + CLOSE_MINUTES * 60_000;
+    total += Math.max(0, Math.min(endMs, close) - Math.max(startMs, open));
+  }
+  return total;
+}
+
 // "10월 28일(수)"
 export function dayLabel(day: string) {
   const [, month, date] = day.split("-").map(Number);

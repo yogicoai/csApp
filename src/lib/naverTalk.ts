@@ -40,16 +40,53 @@ export type TalkEvent = {
 
 export class TalkSendError extends Error {}
 
-export function isNaverTalkConfigured() {
-  return Boolean(process.env.NAVER_TALK_AUTH_KEY) && (process.env.NAVER_TALK_WEBHOOK_SECRET ?? "").length >= MIN_SECRET_LENGTH;
+// 연결한 톡톡 계정 — 톡톡 계정마다 받는 주소(비밀값)와 보내기 키가 따로다.
+//  첫 계정: NAVER_TALK_AUTH_KEY · NAVER_TALK_WEBHOOK_SECRET · NAVER_TALK_NAME(화면 이름, 선택)
+//  둘째 계정: 같은 이름 끝에 _2 (NAVER_TALK_AUTH_KEY_2 · NAVER_TALK_WEBHOOK_SECRET_2 · NAVER_TALK_NAME_2)
+// 첫 계정 상담은 talk.account 가 비어 있고(예전 데이터 그대로), 둘째 계정 상담은 talk.account = "2".
+export type TalkAccount = { key: string; name: string; authKey: string; secret: string };
+
+const ACCOUNT_SLOTS = [
+  { key: "", suffix: "", fallback: "네이버 톡톡" },
+  { key: "2", suffix: "_2", fallback: "네이버 톡톡 2" },
+] as const;
+
+export function talkAccounts(): TalkAccount[] {
+  return ACCOUNT_SLOTS.flatMap(({ key, suffix, fallback }) => {
+    const authKey = process.env[`NAVER_TALK_AUTH_KEY${suffix}`] ?? "";
+    const secret = process.env[`NAVER_TALK_WEBHOOK_SECRET${suffix}`] ?? "";
+    if (!authKey || secret.length < MIN_SECRET_LENGTH) return [];
+    return [{ key, name: process.env[`NAVER_TALK_NAME${suffix}`]?.trim() || fallback, authKey, secret }];
+  });
 }
 
-export function isTalkWebhookSecret(given: string) {
-  const secret = process.env.NAVER_TALK_WEBHOOK_SECRET ?? "";
-  if (secret.length < MIN_SECRET_LENGTH) return false;
-  const a = Buffer.from(secret);
+export function talkAccountByKey(key = "") {
+  return talkAccounts().find((account) => account.key === key) ?? null;
+}
+
+export function isNaverTalkConfigured() {
+  return talkAccounts().length > 0;
+}
+
+// 주소 끝 비밀값으로 어느 계정의 웹훅인지 찾는다(맞는 계정이 없으면 null).
+export function talkAccountBySecret(given: string) {
   const b = Buffer.from(given);
-  return a.length === b.length && timingSafeEqual(a, b);
+  return (
+    talkAccounts().find((account) => {
+      const a = Buffer.from(account.secret);
+      return a.length === b.length && timingSafeEqual(a, b);
+    }) ?? null
+  );
+}
+
+// 계정마다 진행 중 상담을 고객당 하나로 — 둘째 계정은 계정 이름을 앞에 붙여 첫 계정 고객과 섞이지 않게 한다.
+function openKey(account: TalkAccount, user: string) {
+  return account.key ? `${account.key}:${user}` : user;
+}
+
+// 이 계정의 상담만 — 첫 계정 상담은 talk.account 가 없다.
+function accountFilter(account: TalkAccount) {
+  return account.key ? { "talk.account": account.key } : { "talk.account": { $in: [null, ""] } };
 }
 
 // 운영 서버가 x-forwarded-for 맨 앞에 실제 접속 IP를 넣는 환경에서만 켠다(NAVER_TALK_CHECK_IP=1).
@@ -109,12 +146,12 @@ function isDuplicateKey(error: unknown) {
   return (error as { code?: number } | null)?.code === 11000;
 }
 
-async function findOpenTalkChat(user: string) {
-  return LiveChat.findOne({ "talk.openUser": user }).lean<LiveChatRecord | null>();
+async function findOpenTalkChat(account: TalkAccount, user: string) {
+  return LiveChat.findOne({ "talk.openUser": openKey(account, user) }).lean<LiveChatRecord | null>();
 }
 
 // 새 톡톡 상담 — 그사이 같은 고객의 다른 메시지가 먼저 상담을 열었으면(고유 인덱스 충돌) 그 상담을 쓴다.
-async function openTalkChat(user: string, status: "waiting" | "active" = "waiting") {
+async function openTalkChat(account: TalkAccount, user: string, status: "waiting" | "active" = "waiting") {
   const closure = await todayClosureState().catch(() => null);
   try {
     const created = await LiveChat.create({
@@ -124,18 +161,18 @@ async function openTalkChat(user: string, status: "waiting" | "active" = "waitin
       status,
       offHours: !isLiveChatOpen() || Boolean(closure?.closedNow),
       source: { via: TALK_VIA },
-      talk: { user, openUser: user },
+      talk: { user, openUser: openKey(account, user), ...(account.key ? { account: account.key } : {}) },
     });
     return created.toObject() as LiveChatRecord;
   } catch (error) {
-    const open = isDuplicateKey(error) ? await findOpenTalkChat(user) : null;
+    const open = isDuplicateKey(error) ? await findOpenTalkChat(account, user) : null;
     if (open) return open;
     throw error;
   }
 }
 
-// 고객 메시지 — 그 고객의 진행 중 톡톡 상담에 붙이고, 없으면 새 상담(대기)을 연다.
-export async function receiveTalkMessage(event: TalkEvent) {
+// 고객 메시지 — 그 계정에서 그 고객의 진행 중 톡톡 상담에 붙이고, 없으면 새 상담(대기)을 연다.
+export async function receiveTalkMessage(event: TalkEvent, account: TalkAccount) {
   await connectDB();
   await ensureTalkIndex();
   // 스팸으로 지운 고객은 차단 기간 동안 받지 않는다(셀프가이드 상담과 같은 규칙).
@@ -145,7 +182,7 @@ export async function receiveTalkMessage(event: TalkEvent) {
   const productName = clip((product?.name ?? "").trim(), 200);
   if (!text && !productName) return;
 
-  const chat = (await findOpenTalkChat(event.user)) ?? (await openTalkChat(event.user));
+  const chat = (await findOpenTalkChat(account, event.user)) ?? (await openTalkChat(account, event.user));
   if (productName) {
     await appendMessage(chat._id, "system", `상품 페이지에서 톡톡 문의를 시작했어요 · ${productName}`, {
       "talk.productName": productName,
@@ -157,13 +194,17 @@ export async function receiveTalkMessage(event: TalkEvent) {
 
 // 톡톡이 되돌려 주는 '보낸 메시지' 사본 — 이 화면에서 보낸 답변이면 이미 대화에 있으니 전송 확인만 하고,
 // 톡톡 파트너센터(앱 포함)에서 직원이 직접 보낸 메시지면 대화에 남긴다(진행 중 상담이면 상담중으로).
-export async function receiveTalkEcho(event: TalkEvent) {
+export async function receiveTalkEcho(event: TalkEvent, account: TalkAccount) {
   await connectDB();
   await ensureTalkIndex();
   const text = talkMessageText(event);
   if (!text) return;
   const now = Date.now();
-  const recent = await LiveChat.find({ "talk.user": event.user, lastMessageAt: { $gte: new Date(now - RECENT_CHAT_MS) } })
+  const recent = await LiveChat.find({
+    "talk.user": event.user,
+    ...accountFilter(account),
+    lastMessageAt: { $gte: new Date(now - RECENT_CHAT_MS) },
+  })
     .sort({ lastMessageAt: -1 })
     .limit(5)
     .lean<LiveChatRecord[]>();
@@ -186,7 +227,9 @@ export async function receiveTalkEcho(event: TalkEvent) {
   }
 
   const chat =
-    (await findOpenTalkChat(event.user)) ?? recent.find((item) => !item.deletedAt) ?? (await openTalkChat(event.user, "active"));
+    (await findOpenTalkChat(account, event.user)) ??
+    recent.find((item) => !item.deletedAt) ??
+    (await openTalkChat(account, event.user, "active"));
   const open = chat.status !== "closed";
   await appendMessage(
     chat._id,
@@ -202,15 +245,13 @@ const SEND_ERRORS: Record<string, string> = {
   "02": "톡톡이 보낼 내용을 읽지 못했어요.",
 };
 
-// 고객 톡톡으로 글 보내기 — 톡톡은 실패도 HTTP 200 으로 주므로 success 를 본다.
-export async function sendTalkText(user: string, text: string) {
-  const key = process.env.NAVER_TALK_AUTH_KEY;
-  if (!key) throw new TalkSendError("네이버 톡톡 보내기 키(NAVER_TALK_AUTH_KEY)가 설정되지 않았어요.");
+// 고객 톡톡으로 글 보내기 — 그 상담이 들어온 계정의 보내기 키로. 톡톡은 실패도 HTTP 200 으로 주므로 success 를 본다.
+export async function sendTalkText(account: TalkAccount, user: string, text: string) {
   let response: Response;
   try {
     response = await fetch(SEND_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json;charset=UTF-8", Authorization: key },
+      headers: { "Content-Type": "application/json;charset=UTF-8", Authorization: account.authKey },
       body: JSON.stringify({ event: "send", user, textContent: { text } }),
       signal: AbortSignal.timeout(8000),
     });
@@ -228,13 +269,15 @@ export async function sendTalkText(user: string, text: string) {
 export async function replyByTalk(chat: LiveChatRecord, text: string) {
   const user = chat.talk?.user;
   if (!user) throw new TalkSendError("톡톡 고객 정보가 없어 보낼 수 없어요.");
+  const account = talkAccountByKey(chat.talk?.account ?? "");
+  if (!account) throw new TalkSendError("이 상담이 들어온 톡톡 계정의 연결 설정(보내기 키)이 없어요.");
   const result = await appendMessage(chat._id, "agent", text, {}, { talk: { state: "sending" } });
   if (!result) return null;
   const { seq } = result.message;
 
   let error = "";
   try {
-    await sendTalkText(user, text);
+    await sendTalkText(account, user, text);
     await LiveChatMessage.updateOne({ chatId: chat._id, seq }, { $set: { "talk.state": "sent" } });
   } catch (cause) {
     error = cause instanceof TalkSendError ? cause.message : "톡톡으로 보내지 못했어요.";

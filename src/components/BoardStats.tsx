@@ -3,7 +3,7 @@
 import { AlarmClock, ArrowRight, ClipboardList, Inbox, MessageSquareWarning, RefreshCw, Send, Star } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { BOARD_PERIODS, type BoardSummary, formatHours } from "@/lib/boards";
+import { BOARD_PERIODS, type BoardSummary, formatWorkHours } from "@/lib/boards";
 
 // 상담 지표 · 게시판 — 홈페이지(Q&A·상품 후기)와 스마트스토어(상품문의·고객문의)를 나란히 요약한다.
 // 숫자는 /api/admin/boards/stats 가 cafe24·onlineData 에서 그때그때 세고, 우리 앱에서 단 답변은 기록에서 센다.
@@ -22,8 +22,18 @@ type Tile = { label: string; value: string; hint: string; icon: typeof Inbox };
 function answerTiles(name: string, summary: BoardSummary): Tile[] {
   return [
     { label: `${name} 글`, value: `${summary.total}건`, hint: `답변 완료 ${summary.answered}건`, icon: Inbox },
-    { label: "미답변", value: `${summary.open}건`, hint: summary.open ? `가장 오래 ${formatHours(summary.oldestOpenHours)} 기다림` : "모두 답했어요", icon: MessageSquareWarning },
-    { label: "평균 답변 시간", value: formatHours(summary.avgAnswerHours), hint: "글이 올라온 뒤 첫 답변까지", icon: AlarmClock },
+    {
+      label: "미답변",
+      value: `${summary.open}건`,
+      hint: summary.open ? `가장 오래 근무시간 ${formatWorkHours(summary.oldestOpenHours)} 기다림` : "모두 답했어요",
+      icon: MessageSquareWarning,
+    },
+    {
+      label: "평균 답변 시간",
+      value: formatWorkHours(summary.avgAnswerHours),
+      hint: "근무시간(평일 10:00~17:30)만 셈 — 밤·주말 제외",
+      icon: AlarmClock,
+    },
   ];
 }
 

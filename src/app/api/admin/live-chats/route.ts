@@ -5,7 +5,7 @@ import { connectDB } from "@/lib/db";
 import { adminView, NOT_DELETED, type LiveChatRecord } from "@/lib/liveChat";
 import { isDayString, kstDayRange } from "@/lib/liveChatHours";
 import { CHAT_OUTCOME_KEYS, type ChatOutcome, TALK_VIA } from "@/lib/liveChatOptions";
-import { isNaverTalkConfigured } from "@/lib/naverTalk";
+import { talkAccounts } from "@/lib/naverTalk";
 import { LiveChat } from "@/models/LiveChat";
 import { LiveChatMessage } from "@/models/LiveChatMessage";
 
@@ -117,7 +117,9 @@ export async function GET(request: Request) {
       // 블랙컨슈머로 등록된 고객의 상담 — 상담 id → 주의 표시
       cautions: await chatCautions(chats),
       counts,
-      talkConnected: isNaverTalkConfigured(),
+      talkConnected: talkAccounts().length > 0,
+      // 연결한 톡톡 계정 이름(계정이 둘 이상이면 상담마다 어느 계정인지 보여 준다) — 키·비밀값은 내보내지 않는다.
+      talkAccounts: talkAccounts().map((account) => ({ key: account.key, name: account.name })),
     });
   } catch {
     return NextResponse.json({ error: "실시간 상담 목록을 불러오지 못했습니다." }, { status: 503 });

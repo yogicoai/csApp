@@ -58,7 +58,7 @@ export type LiveChatRecord = {
     referrer?: string;
     param?: string;
   };
-  talk?: { user?: string; openUser?: string; productName?: string; productUrl?: string };
+  talk?: { user?: string; openUser?: string; productName?: string; productUrl?: string; account?: string };
   offHours?: boolean;
   contact?: { phone?: string; consentAt?: Date };
   notifiedAt?: Date;
@@ -144,7 +144,7 @@ export function adminView(chat: LiveChatRecord) {
       referrer: chat.source?.referrer ?? "",
       param: chat.source?.param ?? "",
     },
-    talk: { productName: chat.talk?.productName ?? "", productUrl: chat.talk?.productUrl ?? "" },
+    talk: { productName: chat.talk?.productName ?? "", productUrl: chat.talk?.productUrl ?? "", account: chat.talk?.account ?? "" },
     offHours: Boolean(chat.offHours),
     contactPhone: chat.contact?.phone ?? "",
     notifiedAt: chat.notifiedAt?.toISOString() ?? "",

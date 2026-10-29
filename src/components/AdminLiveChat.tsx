@@ -47,6 +47,9 @@ import {
 
 export type Snippet = { id: string; title: string; body: string };
 
+// 연결한 톡톡 계정(이름만 — 키·비밀값은 서버에만)
+type TalkAccountName = { key: string; name: string };
+
 type ChatStatus = "waiting" | "active" | "closed";
 export type ChatSummary = {
   id: string;
@@ -58,7 +61,7 @@ export type ChatSummary = {
   intake: { purchasePlace: string; inquiryType: string; orderNumber: string };
   source: { via: string; app: string; embedded: boolean; parentOrigin: string; referrer: string; param: string };
   // 네이버 톡톡 상담이 '톡톡문의'로 시작된 상품 페이지
-  talk: { productName: string; productUrl: string };
+  talk: { productName: string; productUrl: string; account: string };
   offHours: boolean;
   // 운영시간 외 문의 접수 때 받은 휴대폰(답변 안내 문자용)과 문자를 보낸 때
   contactPhone: string;
@@ -246,11 +249,16 @@ function ReplyNotice({ chat, onNotified }: { chat: ChatSummary; onNotified: (not
 }
 
 // 대화 위 '고객 맥락 바' — 대화를 읽으면서 바로 봐야 하는 정보만 칩으로 보여준다(상세는 오른쪽 고객·주문 탭).
-function contextChips(chat: ChatSummary) {
+// talkAccounts — 연결한 톡톡 계정 이름. 둘 이상이면 톡톡 상담이 어느 계정으로 들어왔는지 '계정' 칩으로 보여 준다.
+function contextChips(chat: ChatSummary, talkAccounts: TalkAccountName[] = []) {
   const talk = chat.source.via === TALK_VIA;
   const chips: Array<{ label: string; value: string; href?: string }> = [];
   if (chat.source.via) {
     chips.push({ label: "경로", value: [viaLabel(chat.source.via), chat.source.app && appLabel(chat.source.app)].filter(Boolean).join(" · ") });
+  }
+  if (talk && talkAccounts.length > 1) {
+    const account = talkAccounts.find((item) => item.key === (chat.talk.account ?? ""));
+    chips.push({ label: "계정", value: account?.name ?? "연결 안 된 계정" });
   }
   if (talk && chat.talk.productName) {
     chips.push({ label: "상품", value: clipText(chat.talk.productName, 28), href: chat.talk.productUrl || undefined });
@@ -399,6 +407,7 @@ export function AdminLiveChat({
   const [via, setVia] = useState(initialVia);
   // 네이버 톡톡 연결 설정 여부(서버 환경변수) — 톡톡 거르기에서 아직 연결 전이면 안내한다.
   const [talkConnected, setTalkConnected] = useState<boolean | null>(null);
+  const [talkAccounts, setTalkAccounts] = useState<TalkAccountName[]>([]);
   // 날짜 바 — 고른 날의 종료 상담 이력과 일별 통계(진행 중·후속 조치·미분류는 날짜와 상관없이 전체).
   const [today, setToday] = useState(kstToday);
   const [day, setDay] = useState(kstToday);
@@ -473,6 +482,7 @@ export function AdminLiveChat({
       setCautions(body.cautions ?? {});
       setCounts({ ...EMPTY_COUNTS, ...body.counts });
       setTalkConnected(typeof body.talkConnected === "boolean" ? body.talkConnected : null);
+      setTalkAccounts(Array.isArray(body.talkAccounts) ? body.talkAccounts : []);
       setListMode(body.mode === "search" ? "search" : "list");
       setLoadedAt(Date.now());
       setListLoaded(true);
@@ -1211,7 +1221,7 @@ export function AdminLiveChat({
               )}
 
               <div className="lc-context" aria-label="고객 맥락">
-                {contextChips(selected).map((chip) =>
+                {contextChips(selected, talkAccounts).map((chip) =>
                   chip.href ? (
                     <a key={chip.label} className="lc-context-chip" href={chip.href} target="_blank" rel="noreferrer noopener">
                       <em>{chip.label}</em>
