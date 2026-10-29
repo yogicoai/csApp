@@ -41,7 +41,16 @@ const MENU = [
   { href: "/admin/black-consumers", label: "블랙컨슈머", icon: ShieldAlert },
   { href: "/admin/faqs", label: "FAQ 관리", icon: Pencil },
   { href: "/admin/leave", label: "연차 관리", icon: CalendarDays },
-  { href: "/admin/guide", label: "사용 가이드", icon: BookOpen },
+  {
+    href: "/admin/guide",
+    label: "사용 가이드",
+    icon: BookOpen,
+    // 사용 가이드 아래 — 회의용 자료
+    children: [
+      { href: "/admin/costs", label: "요금 정리" },
+      { href: "/admin/meeting", label: "회의 기록" },
+    ],
+  },
 ];
 
 function readSoundOn() {
@@ -327,6 +336,17 @@ export function AdminNav() {
                   {talkCount ? <span className="unanswered-count">{talkCount}</span> : null}
                 </Link>
               )}
+              {!collapsed &&
+                "children" in item &&
+                item.children?.map((child) => (
+                  <Link
+                    key={child.href}
+                    href={child.href}
+                    className={isActive(child.href) ? "admin-nav-sub is-doc is-active" : "admin-nav-sub is-doc"}
+                  >
+                    <span className="admin-nav-label">{child.label}</span>
+                  </Link>
+                ))}
             </Fragment>
           );
         })}
