@@ -1,9 +1,9 @@
-import { ArrowLeftRight, CircleHelp, ExternalLink, ListChecks, type LucideIcon, Receipt, Route, Scale, TriangleAlert, Users } from "lucide-react";
+import { ArrowLeftRight, CircleHelp, ExternalLink, Lightbulb, ListChecks, type LucideIcon, Receipt, Route, Scale, TriangleAlert, Users } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { isAuthed } from "@/lib/adminAuth";
 
-// 결정 사항 — 아직 결정 전인 건을 폴더별로 자세히 설명한다(연결하면 어떻게 되는지, 비용, 한계, 순서, 아직 모르는 것). 회의 기록과 따로 둔다.
+// 결정 사항 — 결정 전이거나 보류한 건을 폴더별로 자세히 설명한다(연결하면 어떻게 되는지, 비용, 한계, 순서, 아직 모르는 것). 회의 기록과 따로 둔다.
 // 근거: 톡브릿지 공식 문서·채널톡 안내·사방넷 공식 사용설명서·개발자센터 안내·사방넷 화면·CS팀 답변(2026-11-02~03 확인). 두 API 모두 실제로 호출해 보지는 않았다.
 // 공개 저장소라 매출·문의 건수는 여기에 적지 않는다(몰별 숫자는 저장소 밖 보고서에 있다).
 
@@ -15,10 +15,18 @@ const FOLDERS = [
 type FlowStep = { who: string; what: string };
 type Compare = { item: string; now: string; after: string };
 
+const SABANGNET_REASONS = [
+  "주문이 더 빨리 들어오지 않아요. 사방넷은 판매 즉시 쌓이는 것이 아니라 수집을 실행해야 쇼핑몰에서 가져와요. API 는 모아 둔 자료를 꺼내는 통로라, 붙여도 주문이 실시간으로 들어오지는 않을 것으로 봐요(상세 문서 확인 전 추정).",
+  "아끼는 시간이 크지 않아요. 물류 담당자의 아침 작업은 30분 안에 끝나요. 전부 자동화해도 평일 20일 기준 월 10시간 정도이고, 오류와 예외 건 확인은 남아요.",
+  "주문 규모에 비해 들이는 것이 커요. 주문이 많지 않은데, 매달 API 비용에 개발과 유지 관리까지 더해져요.",
+  "지금 방식이 불편하지 않을 수 있어요. 이미 손에 익은 작업이라 바꿔도 크게 편해지지 않을 수 있어요(담당자 확인 전).",
+  "CS 쪽도 사방넷 링크로 충분해요. 외부몰 문의는 많지 않고, API 로 답해도 쇼핑몰 반영 시차는 남을 것으로 봐요(추정).",
+];
+
 const SABANGNET_NOW: FlowStep[] = [
   { who: "쇼핑몰", what: "자사몰·스마트스토어·외부몰에 주문과 문의가 쌓여요." },
-  { who: "사방넷", what: "직원이 수집 버튼을 눌러야 모여요. 스케줄러(자동 수집)를 쓰지 않아 주말분은 월요일에 몰려요." },
-  { who: "담당 직원", what: "아침에 사방넷에서 내려받아 이카운트에 올려요. 이때 온라인 매출을 알 수 있어요." },
+  { who: "사방넷", what: "수집을 실행할 때 쇼핑몰에서 가져와요. 판매되자마자 쌓이지 않아요. 스케줄러(자동 수집)를 쓰지 않아 주말분은 월요일에 몰려요." },
+  { who: "물류 담당자", what: "다음 날 아침 수집한 주문을 내려받아 이카운트 양식에 맞춰 올려요. 30분 안에 끝나요. 이때 온라인 매출을 알 수 있어요." },
   { who: "CS팀", what: "자사몰·스마트스토어 문의는 [게시판 관리]에서 답하고, 그 외 몰은 사방넷이나 쇼핑몰에 들어가서 답해요." },
 ];
 
@@ -34,7 +42,8 @@ const SABANGNET_USES: Array<Compare & { status: string }> = [
   { item: "외부몰 문의 답변", now: "사방넷이나 쇼핑몰에 들어가서 답변", after: "[게시판 관리]에서 답변", status: "공개 안내에 문의 수집·답변 전송이 있음. 몰별 동작은 미확인" },
   { item: "전화 중 외부몰 주문 찾기", now: "사방넷에서 따로 검색", after: "[고객 조회]에서 함께 검색", status: "전화번호로 찾을 수 있는지 미확인" },
   { item: "외부몰 매출 합치기", now: "사방넷 통계를 따로 확인", after: "자사몰·스마트스토어와 합쳐서 확인", status: "사방넷 통계에 취소·반품이 0으로 나와 클레임 자료 확인 필요" },
-  { item: "이카운트 등록", now: "내려받아 사람이 업로드", after: "자동 등록의 재료로 사용", status: "API 없이 엑셀 변환으로도 시작할 수 있음" },
+  { item: "이카운트 등록", now: "내려받아 사람이 업로드(30분 안에 끝남)", after: "자동 등록의 재료로 사용", status: "줄어드는 시간이 월 10시간 정도. API 없이 엑셀 변환으로도 시작할 수 있음" },
+  { item: "실시간 주문·매출", now: "수집한 뒤에야 보임", after: "더 빨라지지 않을 것으로 봄", status: "상세 문서 확인 전(추정). 스케줄러를 켜도 주문은 30분 간격, 00~06시 제외" },
   { item: "주말 주문 공백", now: "월요일에 몰림", after: "API 만으로는 해결되지 않을 것으로 봄", status: "수집이 늦는 문제라 스케줄러가 해결책(추정)" },
 ];
 
@@ -70,7 +79,7 @@ const SABANGNET_QUESTIONS = [
   "1:1 문의와 쿠팡 고객센터 문의가 API 에 포함되는지",
   "후기(리뷰)를 가져오거나 답글을 달 수 있는지",
   "전화번호로 주문을 찾을 수 있는지",
-  "API 로 받는 자료가 얼마나 자주 새로 들어오는지(스케줄러가 필요한지)",
+  "API 를 호출하면 쇼핑몰에서 새로 수집까지 하는지, 새 주문을 바로 알려 주는 기능이 있는지(스케줄러가 필요한지)",
   "결제 전에 문서를 보거나 시험해 볼 수 있는지",
 ];
 
@@ -82,6 +91,8 @@ const SABANGNET_CHOICES: Compare[] = [
 ];
 
 const SABANGNET_RECHECK = [
+  "주문이 크게 늘어 아침 작업이 30분을 훌쩍 넘길 때",
+  "담당자 부재로 매출 입력이 자주 밀릴 때",
   "전화 응대 중에 외부몰 주문까지 이 프로그램에서 찾아야 할 때",
   "외부몰 매출을 자사몰·스마트스토어와 합쳐서 봐야 할 때",
   "외부몰 문의가 지금보다 크게 늘어 사방넷을 오가는 일이 부담될 때",
@@ -229,11 +240,23 @@ function CompareTable({ rows, head }: { rows: Compare[]; head: [string, string, 
   );
 }
 
-function Decision({ question, plan, cards }: { question: string; plan: string; cards: Array<{ label: string; value: string; note: string }> }) {
+function Decision({
+  state = "결정 전",
+  planLabel = "현재 안",
+  question,
+  plan,
+  cards,
+}: {
+  state?: string;
+  planLabel?: string;
+  question: string;
+  plan: string;
+  cards: Array<{ label: string; value: string; note: string }>;
+}) {
   return (
     <section className="guide-block">
       <div className="dc-decision-head">
-        <span className="dc-state">결정 전</span>
+        <span className="dc-state">{state}</span>
         <h2>{question}</h2>
       </div>
       <div className="cost-summary dc-summary">
@@ -246,7 +269,7 @@ function Decision({ question, plan, cards }: { question: string; plan: string; c
         ))}
       </div>
       <p className="dc-plan">
-        <b>현재 안</b> {plan}
+        <b>{planLabel}</b> {plan}
       </p>
     </section>
   );
@@ -264,14 +287,22 @@ function SabangnetFolder() {
   return (
     <>
       <Decision
+        state="보류"
+        planLabel="결론"
         question="사방넷 API 를 결제해 이 프로그램에 연결할까요?"
-        plan="지금은 연결하지 않아요. 자사몰·스마트스토어는 직접 연결을 그대로 쓰고, 그 외 몰은 CS팀이 [게시판 관리]의 링크로 사방넷에 들어가 확인해요."
+        plan="지금은 도입하지 않아요. 자사몰·스마트스토어는 직접 연결을 그대로 쓰고, 그 외 몰은 CS팀이 [게시판 관리]의 링크로 사방넷에 들어가 확인해요. 이카운트 입력은 물류 담당자가 지금 방식대로 해요."
         cards={[
           { label: "추가 비용", value: "월 5만 원부터", note: "사방넷 사용료와 별도, 우리 버전에 따라 달라짐" },
-          { label: "얻는 것", value: "외부몰 자료를 여기서", note: "문의 답변, 주문 찾기, 매출 합치기" },
-          { label: "풀리지 않는 것", value: "답변 반영 시차", note: "주말 주문 공백도 API 가 아니라 스케줄러 쪽" },
+          { label: "아끼는 시간", value: "월 10시간 정도", note: "아침 작업 30분 × 평일 20일, 확인 작업은 남음" },
+          { label: "풀리지 않는 것", value: "실시간 주문", note: "수집이 늦는 문제라 API 로 풀리지 않음(추정)" },
         ]}
       />
+      <Block icon={Lightbulb} title="왜 지금은 도입하지 않나요">
+        <Bullets items={SABANGNET_REASONS} />
+        <h3 className="dc-subhead">이럴 때 다시 검토해요</h3>
+        <Bullets items={SABANGNET_RECHECK} />
+        <p className="cost-note">주말이나 당일 주문 숫자가 필요해지면 API 보다 스케줄러를 먼저 봐요. 주문을 30분 간격으로 모으지만(00~06시 제외) 확정 매출은 여전히 이카운트예요. 켜기 전에 아침 작업에 영향이 있는지 물류 담당자와 확인해요.</p>
+      </Block>
       <Block icon={Route} title="지금은 이렇게 돌아가요">
         <Flow steps={SABANGNET_NOW} />
       </Block>
@@ -333,9 +364,7 @@ function SabangnetFolder() {
         <Bullets items={SABANGNET_QUESTIONS} />
       </Block>
       <Block icon={Scale} title="두 선택 비교">
-        <CompareTable rows={SABANGNET_CHOICES} head={["항목", "연결 안 함(현재 안)", "연결함"]} />
-        <p className="cost-note">연결하지 않아도 주말 주문 공백은 스케줄러로 줄일 수 있고, 이카운트 자동 등록은 엑셀 변환으로 시작할 수 있어요. 아래와 같을 때 다시 검토해요.</p>
-        <Bullets items={SABANGNET_RECHECK} />
+        <CompareTable rows={SABANGNET_CHOICES} head={["항목", "연결 안 함(결론)", "연결함"]} />
       </Block>
       <p className="cost-source dc-source">
         근거(2026-11-02~03 확인): <Source href="https://docs.sabangnet.co.kr:1975/sabangnet">사방넷 공식 사용설명서</Source> ·{" "}
@@ -437,7 +466,7 @@ export default async function AdminDecisionsPage({ searchParams }: { searchParam
       <header className="guide-hero">
         <p className="eyebrow">CS Center · 결정 사항</p>
         <h1>결정 사항</h1>
-        <p>아직 결정 전인 건이에요. 폴더를 골라 연결하면 어떻게 되는지, 비용과 한계, 진행 순서를 볼 수 있어요.</p>
+        <p>결정 전이거나 보류한 건이에요. 폴더를 골라 연결하면 어떻게 되는지, 비용과 한계, 진행 순서를 볼 수 있어요.</p>
       </header>
 
       <nav className="dc-folders" aria-label="결정 사항 폴더">
