@@ -8170,6 +8170,21 @@ a.lc-context-chip:hover {
   color: #ffffff;
 }
 
+.bd-other-malls {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bd-other-malls:hover {
+  color: var(--primary);
+}
+
 .bd-boards button[aria-selected="true"],
 .bd-status button[aria-selected="true"] {
   border-color: var(--primary);
@@ -10364,7 +10379,140 @@ a.lc-context-chip:hover {
   }
 }
 
-/* 사용 가이드 아래 회의용 하위 메뉴(요금 정리·회의 기록) */
+/* ── 결정 사항 ───────────── */
+.dc-folders {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 6px;
+}
+
+.dc-folders a {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--muted);
+  padding: 10px 8px;
+  font-size: 14px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.dc-folders a[aria-current="page"] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.dc-decision-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.dc-state {
+  border-radius: 999px;
+  background: #fff4dc;
+  color: #94610a;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dc-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.dc-summary strong {
+  font-size: 19px;
+}
+
+.dc-plan {
+  margin-top: 12px;
+  border-radius: 10px;
+  background: #f2fcfe;
+  padding: 10px 12px;
+  color: #3a4754;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.dc-plan b {
+  margin-right: 4px;
+  color: var(--primary-dark);
+  font-weight: 800;
+}
+
+.dc-flow {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  counter-reset: dc-step;
+  list-style: none;
+}
+
+.dc-flow li {
+  display: grid;
+  grid-template-columns: 24px 128px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid #eef2f5;
+  padding-bottom: 8px;
+  counter-increment: dc-step;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.dc-flow li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.dc-flow li::before {
+  color: var(--primary-dark);
+  font-weight: 800;
+  content: counter(dc-step);
+}
+
+.dc-flow span {
+  color: #3a4754;
+}
+
+.dc-subhead {
+  margin: 16px 0 6px;
+  font-size: 13.5px;
+  font-weight: 800;
+}
+
+.dc-source a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.dc-source a svg {
+  display: inline;
+  vertical-align: -1px;
+}
+
+@media (max-width: 900px) {
+  .dc-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dc-flow li {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .dc-flow span {
+    grid-column: 2;
+  }
+}
+
+/* 사용 가이드 아래 회의용 하위 메뉴(요금 정리·회의 기록·결정 사항) */
 .admin-nav-menu a.admin-nav-sub.is-doc::before {
   background: #b7c3ce;
 }
@@ -10496,6 +10644,7 @@ a.lc-context-chip:hover {
   color: var(--muted);
   font-size: 12.5px;
   line-height: 1.55;
+  white-space: pre-line;
 }
 
 .mt-edit {

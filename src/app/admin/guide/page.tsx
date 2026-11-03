@@ -18,6 +18,7 @@ import {
   UserSearch,
   Users,
 } from "lucide-react";
+import { isAuthed } from "@/lib/adminAuth";
 
 const CUSTOMER_STEPS = [
   { title: "카테고리 선택", desc: "A/S문의 · 교환/환불 · 배송안내 등" },
@@ -80,6 +81,7 @@ const ADMIN_CARDS = [
     title: "게시판 관리",
     points: [
       "왼쪽 메뉴 [게시판 관리] — 홈페이지(Q&A·상품 후기)와 스마트스토어(상품문의·고객문의) 폴더를 따로 보고, 최근 7·30·90일 글을 불러와요",
+      "쿠팡·오늘의집·롯데홈쇼핑 등 그 외 몰 문의는 폴더 아래 링크로 사방넷에 들어가 확인하고 답해요",
       "메뉴 옆 숫자 = 최근 30일 미답변 글(홈페이지 Q&A + 스마트스토어 상품문의·고객문의)",
       "전체·미답변·답변 완료로 거르고 제목·내용·작성자로 찾기, 이미 달린 답변도 함께 보여요",
       "답이 없는 글은 오른쪽 AI 도우미(답변 초안·질문·주문 조회)와 자주 쓰는 답변으로 쓰고 [답변 등록]",
@@ -165,7 +167,7 @@ const ADMIN_CARDS = [
     icon: Megaphone,
     title: "홈페이지 휴무 팝업 (연차 관리 아래)",
     points: [
-      "지정한 연차·반차를 휴무 기간으로 묶어 cafe24 홈페이지에 안내 팝업을 띄워요 — 기본은 휴무 3일 전부터 상담이 다시 열릴 때까지만",
+      "지정한 연차·반차를 휴무 기간으로 묶어 cafe24 홈페이지에 안내 팝업을 띄워요 — 기본은 휴무 3일 전부터 상담이 다시 열릴 때까지, 고객센터 운영시간(평일 10:00 ~ 17:30)에만",
       "평소엔 접혀 있고 가장 가까운 휴무와 노출 상태만 보여요 — [펼치기]로 열기(펼친 상태는 브라우저가 기억)",
       "휴무 기간마다 [팝업] 스위치로 켜고 끄기 — 꺼도 이미지·HTML은 그대로 쓸 수 있어요",
       "미리보기: [홈페이지 · PC]·[홈페이지 · 휴대폰]은 고객에게 뜨는 모습 그대로([팝업 다시 띄우기]), [공지 이미지]는 내려받을 그림 — 휴무가 없으면 예시로 보여 줘요",
@@ -202,7 +204,8 @@ const OPS_LOOP = [
   "반복 → 상담할수록 AI가 똑똑해지는 선순환",
 ];
 
-export default function AdminGuidePage() {
+export default async function AdminGuidePage() {
+  if (!(await isAuthed())) return null; // 로그인 전에는 내용을 응답에 싣지 않는다(layout 참고).
   return (
     <main className="admin-shell guide-page">
       <header className="guide-hero">

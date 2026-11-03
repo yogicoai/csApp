@@ -1,4 +1,5 @@
 import { ArrowRight, MessageCircle, PhoneCall, Receipt, Sparkles, TrendingDown } from "lucide-react";
+import { isAuthed } from "@/lib/adminAuth";
 
 // 요금 정리 — 회의용. TWC 지금 비용, 바꾼 뒤 예상 비용(전화 구성안별), 이번에 만든 기능의 사용료, 카카오톡 상담을 API 로 받을 때 비용.
 // 근거: docs/twc 회의자료(2026-10-22)·결재요청서 2판(CS팀 1차 회신 반영), 카카오 상담톡 딜러사 공개 요금(2026-10-28 조사).
@@ -96,7 +97,8 @@ function CostTable({ rows, total }: { rows: Row[]; total?: string }) {
   );
 }
 
-export default function AdminCostsPage() {
+export default async function AdminCostsPage() {
+  if (!(await isAuthed())) return null; // 로그인 전에는 내용을 응답에 싣지 않는다(layout 참고).
   return (
     <main className="admin-shell guide-page">
       <header className="guide-hero">

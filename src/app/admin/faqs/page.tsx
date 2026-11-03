@@ -1,11 +1,13 @@
 import { AdminFaqManager } from "@/components/AdminFaqManager";
 import { ClaimAssetsButton } from "@/components/ClaimAssetsButton";
+import { isAuthed } from "@/lib/adminAuth";
 import { getAllClaims } from "@/lib/repositories/claimRepository";
 import { getAdminFaqs } from "@/lib/repositories/faqRepository";
 
 // FAQ 관리 — 셀프가이드에 노출되는 질문·답변을 관리한다.
 // 응대 자산(클레임)은 위쪽 [응대 자산 관리] 버튼의 팝업에서 관리한다(?assets=1 로 들어오면 바로 열림).
 export default async function AdminFaqsPage({ searchParams }: { searchParams: Promise<{ assets?: string }> }) {
+  if (!(await isAuthed())) return null; // 로그인 전에는 내용을 응답에 싣지 않는다(layout 참고).
   const [faqs, claims, params] = await Promise.all([getAdminFaqs(), getAllClaims(), searchParams]);
   const liveClaims = claims.filter((claim) => claim.status === "live" && claim.answer);
   const reviewCount = claims.filter((claim) => claim.status === "review").length;

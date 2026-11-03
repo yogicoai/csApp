@@ -1,4 +1,4 @@
-import { dayLabel, kstDayRange, type LeaveType, nextBusinessDay, shiftDay } from "@/lib/liveChatHours";
+import { dayLabel, isLiveChatOpen, kstDayRange, type LeaveType, nextBusinessDay, shiftDay } from "@/lib/liveChatHours";
 
 // 홈페이지 휴무 팝업 — 연차 관리에 지정한 휴무를 '휴무 기간'으로 묶어 팝업 문구(휴무일·상담 재개 일정)를 만든다.
 // cafe24 에 한 번 심어 둔 스크립트(public/leave-notice.js)가 /api/notice/leave 를 불러 노출 기간에만 띄우고,
@@ -51,7 +51,7 @@ export type LeavePeriod = {
   resumeDay: string;
   resumeTime: "10:00" | "14:00";
   resumeLabel: string; // "11월 2일(월) AM 10:00"
-  showFrom: string; // 이날 0시부터 노출
+  showFrom: string; // 이날부터 노출(운영시간에만)
 };
 
 function partLabel(day: LeaveDay) {
@@ -107,9 +107,9 @@ export function resumeAt(period: LeavePeriod) {
   return new Date(Date.parse(`${period.resumeDay}T${period.resumeTime}:00+09:00`));
 }
 
-// 지금 홈페이지에 띄울 때인가 — 노출 시작일 0시부터 상담이 다시 열릴 때까지
+// 지금 홈페이지에 띄울 때인가 — 노출 시작일부터 상담이 다시 열릴 때까지, 그중 고객센터 운영시간(평일 10:00 ~ 17:30)에만
 export function isNoticeShowing(period: LeavePeriod, now = new Date()) {
-  return period.popup && now >= kstDayRange(period.showFrom).start && now < resumeAt(period);
+  return period.popup && isLiveChatOpen(now) && now >= kstDayRange(period.showFrom).start && now < resumeAt(period);
 }
 
 export const SAMPLE_PERIOD_ID = "sample";

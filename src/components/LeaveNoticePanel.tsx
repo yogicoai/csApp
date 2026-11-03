@@ -12,7 +12,7 @@ import {
   NOTICE_FONT,
   PRETENDARD_CSS_URL,
 } from "@/lib/leaveNotice";
-import { dayLabel } from "@/lib/liveChatHours";
+import { dayLabel, kstToday, LIVE_CHAT_HOURS_LABEL } from "@/lib/liveChatHours";
 
 // 연차 관리 '홈페이지 휴무 팝업' — 지정한 휴무를 기간으로 묶어 cafe24 팝업으로 자동 노출하고(설치 코드 한 번),
 // 같은 내용을 이미지(톡톡·카카오 공지용)·HTML 로도 내려받는다. 문구는 고칠 수 있고 비우면 기본 문구로 돌아간다.
@@ -78,7 +78,7 @@ function exposureNote(period: PeriodView, isSample: boolean) {
     return `예시예요 — 예정된 휴무가 없어서 ${period.dateLabel} 하루 연차로 보여 드려요. 달력에서 휴무를 지정하면 그 날짜로 바뀌어요.`;
   }
   if (!period.popup) return "팝업이 꺼져 있어 홈페이지에는 뜨지 않아요. 이미지·HTML 은 그대로 쓸 수 있어요.";
-  return `홈페이지 노출: ${dayLabel(period.showFrom)} 0시부터 상담 재개(${period.resumeLabel}) 전까지${period.showing ? " — 지금 노출 중" : ""}`;
+  return `홈페이지 노출: ${dayLabel(period.showFrom)}부터 상담 재개(${period.resumeLabel}) 전까지, 운영시간(${LIVE_CHAT_HOURS_LABEL})에만${period.showing ? " — 지금 노출 중" : ""}`;
 }
 
 // 공지 이미지 — 서버가 그때그때 만드는 PNG(글꼴을 받아 그려서 1~2초 걸린다)
@@ -107,6 +107,8 @@ function NoticeImage({ src }: { src: string }) {
 function periodState(period: PeriodView) {
   if (!period.popup) return { className: "is-off", label: "팝업 꺼짐" };
   if (period.showing) return { className: "is-on", label: "지금 홈페이지에 노출 중" };
+  // 노출 기간이지만 지금은 운영시간 밖이라 뜨지 않는 때
+  if (period.showFrom <= kstToday()) return { className: "is-soon", label: `운영시간(${LIVE_CHAT_HOURS_LABEL})에 노출` };
   return { className: "is-soon", label: `${dayLabel(period.showFrom)}부터 노출` };
 }
 
@@ -488,7 +490,7 @@ export function LeaveNoticePanel() {
           <summary>cafe24 자동 팝업 설치 코드 (한 번만)</summary>
           <p>
             cafe24 디자인 편집에서 공통 레이아웃 맨 아래에 아래 한 줄을 넣어 두면, 위 목록의 &lsquo;팝업&rsquo;이 켜진 휴무만
-            노출 기간에 자동으로 떠요(고객은 &lsquo;오늘 하루 보지 않기&rsquo;로 닫을 수 있어요).
+            노출 기간의 운영시간({LIVE_CHAT_HOURS_LABEL})에 자동으로 떠요(고객은 &lsquo;오늘 하루 보지 않기&rsquo;로 닫을 수 있어요).
             {isLocal && " 지금 주소는 이 PC 주소라, 서버에 올린 뒤 그 주소로 된 코드를 넣어야 해요."}
           </p>
           <div className="ln-code">

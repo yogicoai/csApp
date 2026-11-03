@@ -3,10 +3,12 @@ import { BoardStats } from "@/components/BoardStats";
 import { UnansweredBadge } from "@/components/UnansweredBadge";
 import { EngagementDashboard } from "@/components/EngagementDashboard";
 import { WeeklyReport } from "@/components/WeeklyReport";
+import { isAuthed } from "@/lib/adminAuth";
 import { getAdminFaqs } from "@/lib/repositories/faqRepository";
 
 // 상담 지표 — 셀프가이드 사용량과 상담 전환 흐름을 한눈에 본다.
 export default async function AdminPage() {
+  if (!(await isAuthed())) return null; // 로그인 전에는 내용을 응답에 싣지 않는다(layout 참고).
   const faqs = await getAdminFaqs();
 
   return (

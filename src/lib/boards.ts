@@ -51,6 +51,9 @@ export const SMARTSTORE_BOARDS = [
 ] as const;
 export type SmartstoreKind = (typeof SMARTSTORE_BOARDS)[number]["id"];
 
+// 그 외 몰(쿠팡·오늘의집·롯데홈쇼핑 등) 문의는 CS 가 사방넷에서 확인하고 답한다 — 게시판 관리에는 링크만 둔다.
+export const SABANGNET_URL = "https://www.sabangnet.co.kr/";
+
 export const BOARD_PERIODS = [7, 30, 90] as const;
 export const BOARD_ANSWER_MAX = 2000;
 // 게시판 관리에서 답을 달면 왼쪽 메뉴 숫자를 바로 다시 세도록 알리는 브라우저 이벤트

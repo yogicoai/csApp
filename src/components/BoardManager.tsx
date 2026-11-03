@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Lock, MessageSquareReply, Paperclip, Pencil, RefreshCw, Search, Send, Sparkles, X } from "lucide-react";
+import { ExternalLink, Loader2, Lock, MessageSquareReply, Paperclip, Pencil, RefreshCw, Search, Send, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssistPanel } from "@/components/AssistPanel";
 import {
@@ -17,6 +17,7 @@ import {
   HOMEPAGE_BOARDS,
   homepageBoard,
   needsAnswer,
+  SABANGNET_URL,
   SMARTSTORE_BOARDS,
   type SmartstoreKind,
 } from "@/lib/boards";
@@ -313,6 +314,10 @@ export function BoardManager() {
             </button>
           ))}
         </div>
+
+        <a className="bd-other-malls" href={SABANGNET_URL} target="_blank" rel="noreferrer">
+          쿠팡·오늘의집·롯데홈쇼핑 등 그 외 몰은 사방넷에서 확인 <ExternalLink size={13} />
+        </a>
 
         {folder === "homepage" ? (
           <div className="bd-boards" role="tablist" aria-label="홈페이지 게시판">

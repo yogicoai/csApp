@@ -49,6 +49,7 @@ const MENU = [
     children: [
       { href: "/admin/costs", label: "요금 정리" },
       { href: "/admin/meeting", label: "회의 기록" },
+      { href: "/admin/decisions", label: "결정 사항" },
     ],
   },
 ];

@@ -3,7 +3,7 @@ import { resumeAt } from "@/lib/leaveNotice";
 import { currentLeaveNotice } from "@/lib/leaveNoticeServer";
 
 // 홈페이지(cafe24) 휴무 팝업 — public/leave-notice.js 가 다른 도메인에서 부르므로 누구나 읽게 둔다(공개 공지라 비밀 없음).
-// 노출 기간이 아니면 notice: null. 1분 캐시.
+// 노출 기간의 운영시간이 아니면 notice: null. 1분 캐시.
 const HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
