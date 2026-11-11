@@ -69,6 +69,10 @@ export function AdminLiveChatAssist({ chat, snippets, onSnippetsChange, onInsert
   const [snippetQuery, setSnippetQuery] = useState("");
   const [editing, setEditing] = useState<SnippetDraft | null>(null);
   const [snippetError, setSnippetError] = useState("");
+  // 톡톡 상담 구매처 — 상담원이 고른 값(saved)은 상담 정보가 새로 올 때까지만 앞세운다(그사이 고객 답으로 바뀌면 그쪽을 따른다).
+  const [placeSaved, setPlaceSaved] = useState<{ value: string; base: string } | null>(null);
+  const [placeBusy, setPlaceBusy] = useState(false);
+  const [placeError, setPlaceError] = useState("");
 
   // 같은 고객의 이전 상담 — 고객·주문 탭을 처음 열 때 한 번 불러온다.
   useEffect(() => {
@@ -108,6 +112,28 @@ export function AdminLiveChatAssist({ chat, snippets, onSnippetsChange, onInsert
       setOrdersNote("주문을 조회하지 못했습니다.");
     } finally {
       setOrdersBusy(false);
+    }
+  }
+
+  async function changePlace(value: string) {
+    setPlaceBusy(true);
+    setPlaceError("");
+    try {
+      const response = await fetch(`/api/admin/live-chats/${chat.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ purchasePlace: value }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setPlaceError(body.error ?? "구매처를 바꾸지 못했어요.");
+        return;
+      }
+      setPlaceSaved({ value, base: chat.intake.purchasePlace });
+    } catch {
+      setPlaceError("구매처를 바꾸지 못했어요.");
+    } finally {
+      setPlaceBusy(false);
     }
   }
 
@@ -158,6 +184,12 @@ export function AdminLiveChatAssist({ chat, snippets, onSnippetsChange, onInsert
         .filter(Boolean)
         .join(" · ")
     : "기록 없음";
+  const isTalk = source.via === TALK_VIA;
+  const place = placeSaved && placeSaved.base === chat.intake.purchasePlace ? placeSaved.value : chat.intake.purchasePlace;
+  const defaultPlace = chat.talk.defaultPlace ?? "";
+  // AI 도우미가 실제로 쓰는 기준 — 스마트스토어·공식몰만 기준이 되고, 그 밖의 값은 모름
+  const placeBasis = place === "smartstore" || place === "official" ? place : place ? "" : defaultPlace;
+  const autoLabel = defaultPlace ? `자동 — ${purchasePlaceLabel(defaultPlace)}(톡톡 계정 기준)` : "모름 — AI가 먼저 물어봐요";
 
   return (
     <div className="lc-assist-inner">
@@ -176,13 +208,33 @@ export function AdminLiveChatAssist({ chat, snippets, onSnippetsChange, onInsert
         ))}
       </div>
 
+      {tab === "ai" && isTalk && (
+        <div className="lc-place">
+          <label>
+            고객 구매처
+            <select value={place} disabled={placeBusy} onChange={(event) => void changePlace(event.target.value)}>
+              <option value="">{autoLabel}</option>
+              <option value="smartstore">네이버 스마트스토어</option>
+              <option value="official">요기보 공식몰(네이버페이 결제 포함)</option>
+              {place && place !== "smartstore" && place !== "official" && <option value={place}>{purchasePlaceLabel(place)}</option>}
+            </select>
+          </label>
+          <p>
+            {placeBasis === "smartstore"
+              ? "AI 도우미가 스마트스토어 기준으로 쓰고, 주문은 스마트스토어에서만 찾아요."
+              : placeBasis === "official"
+                ? "AI 도우미가 공식몰 기준으로 쓰고, 주문은 자사몰에서만 찾아요."
+                : "구매처에 따라 달라지는 문의면 AI 초안이 먼저 구매처를 물어봐요. 주문은 두 곳 모두에서 찾아요."}
+          </p>
+          {placeError && <p className="lc-place-error">{placeError}</p>}
+        </div>
+      )}
+
       <AssistPanel
         hidden={tab !== "ai"}
         endpoint={`/api/admin/live-chats/${chat.id}/assist`}
         onInsert={onInsert}
-        intro={`고객 메시지를 읽고 [답변 초안 만들기]를 누르면 FAQ와 검증된 응대 사례를 근거로 고객 안내 문구를 만들어요. 확인 후 [답변창에 넣기]로 옮겨 보내세요.${
-          chat.source.via === TALK_VIA ? " 네이버 톡톡 상담은 스마트스토어 고객 기준으로 써요." : ""
-        }`}
+        intro="고객 메시지를 읽고 [답변 초안 만들기]를 누르면 FAQ와 검증된 응대 사례를 근거로 고객 안내 문구를 만들어요. 확인 후 [답변창에 넣기]로 옮겨 보내세요."
       />
 
       {tab === "customer" && (
@@ -190,7 +242,9 @@ export function AdminLiveChatAssist({ chat, snippets, onSnippetsChange, onInsert
           <dl className="lc-facts">
             <Fact label="상담번호">{chat.ticketNo || "—"}</Fact>
             <Fact label="유입 경로">{sourceText}</Fact>
-            <Fact label="구매처">{chat.intake.purchasePlace ? purchasePlaceLabel(chat.intake.purchasePlace) : "미입력"}</Fact>
+            <Fact label="구매처">
+              {place ? purchasePlaceLabel(place) : isTalk ? (defaultPlace ? `${purchasePlaceLabel(defaultPlace)}(톡톡 계정 기준)` : "모름") : "미입력"}
+            </Fact>
             <Fact label="문의 유형">{chat.intake.inquiryType || "미입력"}</Fact>
             <Fact label="주문번호">{chat.intake.orderNumber || "미입력"}</Fact>
             {chat.memberId && <Fact label="회원ID">{chat.memberId}</Fact>}

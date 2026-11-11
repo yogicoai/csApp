@@ -2,13 +2,16 @@
 //  · 올리기: 서버가 임시 업로드 주소를 받아 주고 브라우저가 그 주소로 바로 올린다(Vercel 요청 크기 제한 4.5MB 를 피함).
 //  · 분석: 서버가 드롭박스에서 받아 전사한다 / 다시 듣기: 몇 시간짜리 임시 재생 주소로 넘긴다(공개 링크 없음).
 // 키: DROPBOX_APP_KEY·DROPBOX_APP_SECRET·DROPBOX_REFRESH_TOKEN(처음 한 번 '허용'으로 받는 오래 쓰는 키).
-// 회사 계정은 팀 스페이스라, 팀 공용 폴더 경로("/2026_요기코퍼레이션…/csVoice")를 쓰도록 루트 네임스페이스를 기준으로 부른다.
+// 회사 계정은 팀 스페이스라, 팀 공용 폴더 경로("/2026_요기코퍼레이션…/11_고객지원/…")를 쓰도록 루트 네임스페이스를 기준으로 부른다.
 
 const API = process.env.DROPBOX_API_URL || "https://api.dropboxapi.com";
 const CONTENT = process.env.DROPBOX_CONTENT_URL || "https://content.dropboxapi.com";
-export const VOICE_FOLDER = (
-  process.env.DROPBOX_VOICE_FOLDER || "/2026_요기코퍼레이션_온라인·마케팅·디자인/04_개발/cs/csVoice"
-).replace(/\/+$/, "");
+// 고객지원 공용 폴더 — TWC(클라우드게이트) 지난 티켓이 보관된 곳에 녹음도 함께 둔다.
+const SUPPORT_FOLDER = "/2026_요기코퍼레이션_온라인·마케팅·디자인/01_온라인/11_고객지원";
+export const VOICE_FOLDER = (process.env.DROPBOX_VOICE_FOLDER || `${SUPPORT_FOLDER}/음성 상담 녹음`).replace(/\/+$/, "");
+export const TWC_TICKET_FOLDER = (process.env.DROPBOX_TWC_FOLDER || `${SUPPORT_FOLDER}/클라우드게이트 티켓`).replace(/\/+$/, "");
+// 예전 녹음 폴더 — 2026-11-06 이전에 올린 녹음은 여기 남아 있어 다시 듣기·분석만 허용한다(새로 올리지는 않는다).
+const LEGACY_VOICE_FOLDERS = ["/2026_요기코퍼레이션_온라인·마케팅·디자인/04_개발/cs/csVoice"];
 
 export class DropboxError extends Error {}
 
@@ -77,9 +80,47 @@ async function rpc<T>(endpoint: string, args: unknown, what: string): Promise<T>
   return (await response.json()) as T;
 }
 
+function insideFolder(path: string, folder: string) {
+  return path.startsWith(`${folder}/`) && !path.includes("/../") && !path.includes("\\");
+}
+
 // 녹음 폴더 안의 경로인지 — 다른 경로의 파일을 읽거나 재생하지 못하게 막는다.
 export function isVoicePath(path: string) {
-  return path.startsWith(`${VOICE_FOLDER}/`) && !path.includes("/../") && !path.includes("\\");
+  return [VOICE_FOLDER, ...LEGACY_VOICE_FOLDERS].some((folder) => insideFolder(path, folder));
+}
+
+// TWC 티켓 폴더의 엑셀인지 — 가져오기는 이 폴더의 .xlsx 만 읽는다.
+export function isTwcTicketPath(path: string) {
+  return insideFolder(path, TWC_TICKET_FOLDER) && path.toLowerCase().endsWith(".xlsx");
+}
+
+export type DropboxFile = { path: string; name: string; size: number; modified: string };
+
+type ListPage = {
+  entries: Array<{ ".tag": string; name: string; path_display?: string; size?: number; server_modified?: string }>;
+  cursor: string;
+  has_more: boolean;
+};
+
+// 폴더 안의 파일(하위 폴더 포함). 폴더가 아직 없으면 빈 목록.
+export async function listFiles(folder: string): Promise<DropboxFile[]> {
+  let page: ListPage;
+  try {
+    page = await rpc<ListPage>("files/list_folder", { path: folder, recursive: true, limit: 2000 }, "폴더 보기");
+  } catch (error) {
+    if (error instanceof DropboxError && error.message.includes("not_found")) return [];
+    throw error;
+  }
+  const files: DropboxFile[] = [];
+  for (let pages = 1; ; pages++) {
+    for (const entry of page.entries) {
+      if (entry[".tag"] !== "file" || !entry.path_display) continue;
+      files.push({ path: entry.path_display, name: entry.name, size: entry.size ?? 0, modified: entry.server_modified ?? "" });
+    }
+    if (!page.has_more || pages >= 50) break;
+    page = await rpc<ListPage>("files/list_folder/continue", { cursor: page.cursor }, "폴더 보기");
+  }
+  return files;
 }
 
 async function pathExists(path: string) {

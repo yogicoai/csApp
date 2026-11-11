@@ -1,8 +1,8 @@
 import { deleteModel, model, models, Schema } from "mongoose";
 
 // 전화 상담 녹취 — TWC 대체 계획의 "녹음 보관 + AI 요약·답변 초안 + 녹취 찾기".
-// 음성 파일은 베타 동안 로컬 폴더에 두고, DB 에는 전사 텍스트와 분석 결과만 쌓는다.
-// (운영 전환 때 파일 저장소만 공용 드롭박스/Blob 으로 바꾸면 된다.)
+// 음성 원본은 드롭박스 고객지원 폴더(연결이 없으면 로컬 폴더)에 두고, DB 에는 전사 텍스트와 분석 결과만 쌓는다.
+// TWC 에서 쓰던 지난 티켓도 같은 양식으로 옮겨 와 함께 찾고 본다(source: "twc").
 
 const analysisSchema = new Schema(
   {
@@ -24,8 +24,25 @@ const analysisSchema = new Schema(
   { _id: false },
 );
 
+// TWC(클라우드게이트) 지난 티켓 — 티켓 ID 로 합쳐서 같은 엑셀을 다시 가져와도 겹치지 않는다.
+const twcSchema = new Schema(
+  {
+    ticketId: { type: String, required: true }, // 예: #yogibo_12345
+    brand: { type: String, default: "" },
+    channel: { type: String, default: "" }, // 인입채널
+    status: { type: String, default: "" }, // 티켓상태(활성·비활성·해결)
+    agent: { type: String, default: "" }, // 담당자
+    recordingFile: { type: String, default: "" }, // TWC 녹취파일명(파일은 받지 않았다)
+    sourceFiles: { type: [String], default: undefined }, // 이 티켓이 들어 있던 드롭박스 엑셀 경로들
+  },
+  { _id: false },
+);
+
 const voiceCallSchema = new Schema(
   {
+    // recording: 녹음을 올려 전사·분석한 것 / twc: TWC 지난 티켓을 가져온 것(녹음·전사 없음)
+    source: { type: String, enum: ["recording", "twc"], default: "recording" },
+    twc: { type: twcSchema, default: undefined },
     fileName: { type: String, default: "" },
     audioPath: { type: String, default: "" }, // 베타: 로컬 보관 경로(서버 재배포 시 사라질 수 있음)
     dropboxPath: { type: String, default: "" }, // 드롭박스에 보관한 원본 경로(lib/dropbox — 연결돼 있으면 이쪽에 둔다)
@@ -44,6 +61,8 @@ const voiceCallSchema = new Schema(
 );
 
 voiceCallSchema.index({ createdAt: -1 });
+voiceCallSchema.index({ "twc.ticketId": 1 }, { unique: true, partialFilterExpression: { "twc.ticketId": { $exists: true } } });
+voiceCallSchema.index({ "twc.sourceFiles": 1 }, { partialFilterExpression: { "twc.sourceFiles": { $exists: true } } });
 
 // dev 서버가 이전 스키마를 캐시하지 않도록 다시 등록한다(운영에서는 한 번만 등록).
 if (process.env.NODE_ENV !== "production" && models.VoiceCall) deleteModel("VoiceCall");

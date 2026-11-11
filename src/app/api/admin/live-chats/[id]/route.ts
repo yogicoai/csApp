@@ -11,7 +11,15 @@ import {
   parseAfter,
   spamBlockKeys,
 } from "@/lib/liveChat";
-import { CHAT_OUTCOME_KEYS, DELETE_REASON_KEYS, type DeleteReason, SPAM_BLOCK_DAYS, TALK_VIA } from "@/lib/liveChatOptions";
+import {
+  CHAT_OUTCOME_KEYS,
+  DELETE_REASON_KEYS,
+  type DeleteReason,
+  PURCHASE_PLACE_KEYS,
+  SPAM_BLOCK_DAYS,
+  TALK_VIA,
+} from "@/lib/liveChatOptions";
+import { sendTalkClosing, takeTalkThread, talkClosedNote, talkOpenKey } from "@/lib/naverTalk";
 import { LiveChat } from "@/models/LiveChat";
 import { LiveChatBlock } from "@/models/LiveChatBlock";
 import { LiveChatMessage } from "@/models/LiveChatMessage";
@@ -49,8 +57,12 @@ const patchSchema = z
         memo: z.string().trim().max(200).optional(),
       })
       .optional(),
+    // 구매처 바꾸기 — 톡톡 상담에서 상담원이 고른다(빈 값 = 톡톡 계정 기본값으로 되돌림). AI 도우미 기준과 주문 찾는 곳이 바뀐다.
+    purchasePlace: z.union([z.enum(PURCHASE_PLACE_KEYS), z.literal("")]).optional(),
   })
-  .refine((body) => body.status || body.outcome, { message: "status 또는 outcome 이 필요합니다." });
+  .refine((body) => body.status || body.outcome || body.purchasePlace !== undefined, {
+    message: "status·outcome·purchasePlace 중 하나가 필요합니다.",
+  });
 
 // 상담 종료(결과 함께) / 결과만 변경(종료된 상담) / 다시 열기(결과 초기화)
 export async function PATCH(request: Request, context: RouteContext) {
@@ -66,10 +78,14 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "휴지통에 있는 상담입니다. 먼저 복구해 주세요." }, { status: 409 });
   }
 
-  const { status, outcome } = parsed.data;
+  const { status, outcome, purchasePlace } = parsed.data;
   const outcomeSet = outcome
     ? { "outcome.result": outcome.result, "outcome.memo": outcome.memo ?? "", "outcome.decidedAt": new Date() }
     : {};
+
+  if (purchasePlace !== undefined) {
+    await LiveChat.updateOne({ _id: chat._id }, { $set: { "intake.purchasePlace": purchasePlace } });
+  }
 
   if (status === "closed") {
     // 상태가 실제로 바뀔 때만 종료 안내를 남긴다(중복 클릭 방지). 이미 고객이 종료했다면 결과만 기록한다.
@@ -79,14 +95,22 @@ export async function PATCH(request: Request, context: RouteContext) {
       { $set: { status: "closed", closedAt: new Date(), closedBy: "agent", ...outcomeSet }, $unset: { "talk.openUser": 1 } },
     );
     if (changed.modifiedCount) {
-      const closedText = chat.source?.via === TALK_VIA ? LIVE_CHAT_MESSAGES.closedTalk : LIVE_CHAT_MESSAGES.closedByAgent;
-      await appendMessage(chat._id, "system", closedText);
+      if (chat.source?.via === TALK_VIA) {
+        // 핸드오버를 켠 계정이면 먼저 주도권을 가져와 파트너센터도 [완료]로 바꾸고(파트너센터 상담원이 맡고 있던 대화 포함),
+        // 고객 톡톡에 종료 안내를 보낸다. 둘 다 못 해도 종료는 되고, 결과는 상담원에게 안내로 남긴다.
+        const thread = await takeTalkThread(chat);
+        const sent = await sendTalkClosing(chat, LIVE_CHAT_MESSAGES.talkClosing);
+        await appendMessage(chat._id, "system", talkClosedNote(sent, thread));
+      } else {
+        await appendMessage(chat._id, "system", LIVE_CHAT_MESSAGES.closedByAgent);
+      }
     } else if (outcome) {
       await LiveChat.updateOne({ _id: chat._id }, { $set: outcomeSet });
     }
   } else if (status === "active") {
     // 톡톡 고객은 진행 중 상담이 하나만(고유 인덱스) — 그사이 새 메시지로 새 상담이 열렸으면 그쪽에서 잇는다.
-    const talkOpen = chat.talk?.user ? { "talk.openUser": chat.talk.user } : {};
+    // 둘째 계정 상담은 진행 중 표시에 계정 key 가 붙는다(lib/naverTalk 와 같은 값이어야 다음 메시지가 이 상담에 붙는다).
+    const talkOpen = chat.talk?.user ? { "talk.openUser": talkOpenKey(chat.talk.account ?? "", chat.talk.user) } : {};
     const changed = await LiveChat.updateOne(
       { _id: chat._id, status: "closed" },
       { $set: { status: "active", closedBy: "", ...talkOpen }, $unset: { closedAt: 1, outcome: 1 } },

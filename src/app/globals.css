@@ -6490,6 +6490,159 @@ body:has(.guide-shell--ownmall) {
   word-break: break-word;
 }
 
+/* 드롭박스 고객지원 폴더 — 분석 전 녹음 [진행] · TWC 지난 티켓 가져오기 */
+.vc-folder {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  padding: 12px 14px;
+}
+
+.vc-folder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vc-folder-head h3,
+.vc-folder summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 800;
+}
+
+.vc-folder summary {
+  cursor: pointer;
+}
+
+.vc-folder-head h3 span,
+.vc-folder summary span {
+  border-radius: 999px;
+  background: #e7f8fb;
+  color: var(--primary-dark);
+  padding: 1px 8px;
+  font-size: 11.5px;
+}
+
+.vc-folder-head button {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted);
+  padding: 5px;
+}
+
+.vc-folder-empty {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.vc-folder-list {
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.vc-folder-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.vc-folder-list li > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vc-folder-list strong {
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vc-folder-list span {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.vc-folder-list em {
+  color: #c0392b;
+  font-size: 11.5px;
+  font-style: normal;
+}
+
+.vc-folder-list button,
+.vc-folder-all {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  background: #e9fbfe;
+  color: var(--primary-dark);
+  padding: 6px 10px;
+  font-size: 12.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.vc-folder-list button:disabled,
+.vc-folder-all:disabled {
+  opacity: 0.5;
+}
+
+.vc-folder .vc-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vc-filter {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.vc-filter button {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #ffffff;
+  color: var(--muted);
+  padding: 7px 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.vc-filter button[aria-pressed="true"] {
+  border-color: var(--primary);
+  background: #e9fbfe;
+  color: var(--primary-dark);
+}
+
+.vc-chip.is-twc {
+  background: #fff4dc;
+  color: #94610a;
+}
+
+.vc-card p.vc-memo {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
 @media (max-width: 1080px) {
   .vc-admin {
     grid-template-columns: 1fr;
@@ -7313,6 +7466,49 @@ a.lc-context-chip:hover {
   gap: 10px;
   min-width: 0;
   padding: 14px 16px 18px;
+}
+
+/* 톡톡 상담의 고객 구매처 — AI 도우미 기준과 주문 찾는 곳을 정한다 */
+.lc-place {
+  display: grid;
+  gap: 4px;
+  margin: 12px 16px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7fafc;
+  padding: 9px 11px;
+}
+
+.lc-place label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: #3a4754;
+  font-size: 12.5px;
+  font-weight: 800;
+}
+
+.lc-place select {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.lc-place p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lc-place .lc-place-error {
+  color: #c0392b;
 }
 
 .lc-assist-head {
@@ -10008,6 +10204,11 @@ a.lc-context-chip:hover {
   color: #137a3a;
 }
 
+.cu-chip.is-twc {
+  background: #fff4dc;
+  color: #94610a;
+}
+
 .cu-item-text {
   display: -webkit-box;
   overflow: hidden;
@@ -10486,6 +10687,57 @@ a.lc-context-chip:hover {
   margin: 16px 0 6px;
   font-size: 13.5px;
   font-weight: 800;
+}
+
+/* 답을 기다리는 중 — 카카오 알림처럼 N 표시 */
+.dc-new {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 5px;
+  border-radius: 999px;
+  background: #ff5a1f;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  vertical-align: 1px;
+}
+
+.dc-checking {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+  border: 1px solid #ffd7c2;
+  border-radius: 10px;
+  background: #fff5ef;
+  padding: 10px 12px;
+  color: #5b3a29;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.dc-checking .dc-new {
+  margin: 3px 0 0;
+}
+
+/* CS팀이 그대로 복사해 보낼 메일 문안 */
+.dc-mail {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7fafc;
+  padding: 12px 14px;
+  color: #3a4754;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .dc-source a {

@@ -253,6 +253,7 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
                         <span className="cu-item-top">
                           <strong>{kstText(call.callDate, true) || "일시 미상"}</strong>
                           {call.durationSec > 0 && <span>{formatDuration(call.durationSec)}</span>}
+                          {call.source === "twc" && <span className="cu-chip is-twc">TWC</span>}
                           {call.category && <span className="cu-chip">{call.category}</span>}
                         </span>
                         <span className="cu-item-text">

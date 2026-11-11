@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",
+    "fflate": "^0.8.3",
     "lucide-react": "^1.16.0",
     "mongoose": "^9.6.2",
     "next": "16.2.6",

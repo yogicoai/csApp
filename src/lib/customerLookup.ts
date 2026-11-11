@@ -37,6 +37,7 @@ export type LookupSection<T> = { state: SectionState; items: T[]; note: string }
 
 export type LookupCall = {
   id: string;
+  source: "recording" | "twc"; // twc: TWC 지난 티켓
   callDate: string;
   durationSec: number;
   status: string;
@@ -100,6 +101,7 @@ const unique = (values: string[]) => Array.from(new Set(values.filter(Boolean)))
 function toLookupCall(call: VoiceCallRecord): LookupCall {
   return {
     id: String(call._id),
+    source: call.source ?? "recording",
     callDate: (call.callDate ?? call.createdAt)?.toISOString() ?? "",
     durationSec: call.durationSec ?? 0,
     status: call.status,

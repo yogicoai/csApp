@@ -61,7 +61,8 @@ export type ChatSummary = {
   intake: { purchasePlace: string; inquiryType: string; orderNumber: string };
   source: { via: string; app: string; embedded: boolean; parentOrigin: string; referrer: string; param: string };
   // 네이버 톡톡 상담이 '톡톡문의'로 시작된 상품 페이지
-  talk: { productName: string; productUrl: string; account: string };
+  // defaultPlace — 구매처를 모를 때 쓰는 그 톡톡 계정의 기본값(smartstore | official | 빈 값 = 모름)
+  talk: { productName: string; productUrl: string; account: string; defaultPlace?: string };
   offHours: boolean;
   // 운영시간 외 문의 접수 때 받은 휴대폰(답변 안내 문자용)과 문자를 보낸 때
   contactPhone: string;

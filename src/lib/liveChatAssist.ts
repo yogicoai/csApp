@@ -15,6 +15,7 @@ import { maskPersonalInfo } from "@/lib/pii";
 import { getLiveClaims, type ClaimItem } from "@/lib/repositories/claimRepository";
 import { getPublishedFaqs } from "@/lib/repositories/faqRepository";
 import type { FaqItem } from "@/lib/sample-data";
+import { resolveTalkPlace, type TalkPlace } from "@/lib/talkPurchasePlace";
 
 // 실시간 채팅상담 '상담 도움' AI — 상담원 전용.
 // 대화 내용 + 사전 질문 + 근거(FAQ, CS가 확정한 라이브 클레임)를 Claude 에 넘겨
@@ -43,7 +44,8 @@ export type AssistSource = { type: "faq" | "claim"; id: string; title: string; c
 const DRAFT_INSTRUCTIONS = `당신은 Yogibo 고객센터 상담원을 돕는 상담 도우미입니다. 상담원이 지금 고객에게 보낼 답변 초안을 작성합니다.
 - 제공된 FAQ와 검증된 CS 응대 사례에 적힌 내용만 근거로 쓰세요. 근거에 없는 정책·절차·금액·일정·기간·연락 채널은 지어내지 마세요.
 - 구매처(스마트스토어 등)에 따라 절차가 다르다는 말은 근거에 그렇게 적혀 있을 때만 쓰세요. 근거에 없으면 구매처를 이유로 다른 곳에 문의하라고 안내하지 마세요.
-- 상담 정보에 '응대 기준'이 있으면 그 기준의 고객으로 보고 답하세요(예: 네이버 톡톡 상담은 스마트스토어 고객). 이때도 정책·절차는 근거에 있는 것만 씁니다.
+- 상담 정보에 '응대 기준'이 있으면 그 기준의 고객으로 보고 답하세요(예: 네이버 톡톡 상담의 구매처 기준). 이때도 정책·절차는 근거에 있는 것만 씁니다.
+- 응대 기준이 '구매처 확인 필요'이고 주문·배송·교환·반품·환불처럼 구매처에 따라 안내가 달라지는 문의면, 답을 단정하지 말고 먼저 스마트스토어에서 구매했는지 요기보 공식 홈페이지에서 구매했는지 정중히 여쭤보는 초안을 쓰세요.
 - 정보가 부족하면 단정하지 말고 필요한 정보(주문번호, 제품명, 증상 등)를 정중히 요청하거나 확인 후 안내드리겠다고 하세요.
 - "연락드리겠다", "접수해 드리겠다" 같은 약속은 근거나 대화에 그런 절차가 있을 때만 쓰세요.
 - [주문번호]·[전화번호]처럼 대괄호로 가려진 값은 개인정보 보호로 가린 것일 뿐 고객은 실제 값을 적었습니다. 그 값을 다시 요청하거나 "적혀 있지 않다"고 말하지 마세요.
@@ -65,9 +67,10 @@ const BOARD_DRAFT_INSTRUCTIONS = `당신은 Yogibo 고객센터 상담원을 돕
 
 const ASK_INSTRUCTIONS = `당신은 Yogibo 고객센터 상담원을 돕는 상담 도우미입니다. 상담원의 질문에 근거(FAQ, 검증된 CS 응대 사례, 주문 조회 결과)와 지금 상담 내용(채팅 대화 또는 게시판 글)을 바탕으로 짧고 정확하게 답하세요.
 - [주문번호]·[전화번호]처럼 대괄호로 가려진 값은 개인정보 보호로 가린 것일 뿐 고객은 실제 값을 적었습니다. 그 값을 다시 요청하거나 "적혀 있지 않다"고 말하지 마세요.
-- 상담 정보에 '응대 기준'이 있으면 그 기준의 고객으로 보고 답하세요(예: 네이버 톡톡 상담은 스마트스토어 고객).
+- 상담 정보에 '응대 기준'이 있으면 그 기준의 고객으로 보고 답하세요(예: 네이버 톡톡 상담의 구매처 기준). 기준이 '구매처 확인 필요'면 구매처를 아직 모른다고 상담원에게 알리고, 필요하면 구매처를 묻는 고객 안내 문구를 제안하세요.
 - 근거 번호(예: FAQ 2, 사례 1, 주문 A)를 함께 밝히세요. 근거에 없는 정책·절차·연락 채널은 "근거 없음"이라고 분명히 말하고 추측하지 마세요.
-- 주문·배송 상태를 확인해야 하면 주문 조회 도구를 쓰세요. 이 상담(글)에 주문번호나 로그인 회원 정보가 있으면 find_orders_from_chat, 고객이 이름과 주문한 날만 알려 줬으면 find_orders_by_name을 쓰세요. "25일"처럼 날짜만 있으면 오늘을 기준으로 가장 최근의 그날로 보세요. 네이버 톡톡(스마트스토어 기준) 상담은 스마트스토어 주문번호로는 찾을 수 없으니 이름·주문일로 find_orders_by_name을 쓰세요 — 이 조회 제약은 상담원에게만 말하고 고객 안내 문구에는 쓰지 마세요.
+- 주문·배송 상태를 확인해야 하면 주문 조회 도구를 쓰세요. 이 상담(글)에 주문번호나 로그인 회원 정보가 있으면 find_orders_from_chat, 고객이 이름과 주문한 날만 알려 줬으면 find_orders_by_name을 쓰세요. "25일"처럼 날짜만 있으면 오늘을 기준으로 가장 최근의 그날로 보세요. 구매처가 스마트스토어인 네이버 톡톡 상담은 스마트스토어 주문번호로는 찾을 수 없으니 이름·주문일로 find_orders_by_name을 쓰세요 — 이 조회 제약은 상담원에게만 말하고 고객 안내 문구에는 쓰지 마세요.
+- 상담에 구매처 기준이 정해져 있으면 주문은 그 구매처에서만 찾아요(조회 결과에 어디서 찾았는지 적혀 있어요). 다른 곳에서 샀을 수 있으면 상담원에게 구매처를 다시 확인하라고 알려 주세요.
 - 주문 조회 결과에 있는 사실만 말하세요. 주문이 여러 건이면 단정하지 말고 후보를 짧게 정리한 뒤, 고객에게 휴대폰 번호 끝 4자리로 본인 확인을 요청하는 문구를 제안하세요. 한 건도 없으면 이름·주문일을 다시 확인하거나 주문번호를 요청하고, 조회 결과에 '찾지 못했어요'로 적힌 채널(외부몰 등)에서 산 주문일 수 있다고 상담원에게 알려 주세요.
 - 스마트스토어·매장 택배 결과는 실시간이 아닌 사본이라 상담원에게 '○시 기준'을 함께 말하고, 그 뒤 바뀐 상태는 스마트스토어면 판매자센터, 매장 택배면 택배사 송장 조회로 확인하라고 알려 주세요. 기준 시각은 고객 안내 문구에 넣지 마세요.
 - 마크다운 기호(**, #, 목록 기호) 없이 평문으로 5문장 이내로 답하세요.
@@ -164,23 +167,46 @@ function clip(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-// 네이버 톡톡 상담의 응대 기준 — 지금 연결한 톡톡 계정은 스마트스토어 Yogibo 하나라 스마트스토어 고객으로 본다.
-// (네이버페이·자사몰 쪽 톡톡 계정을 더 붙이면 계정별로 기준을 나눈다.)
-const TALK_BASIS =
-  "응대 기준: 네이버 스마트스토어 — 스마트스토어 Yogibo 톡톡으로 들어온 상담이다. 고객이 다른 구매처를 말하지 않으면 스마트스토어 구매 고객으로 보고, 주문·배송·교환·반품·환불은 스마트스토어(네이버페이 주문) 기준으로 안내한다. 자사몰(요기보 공식몰) 전용 혜택·적립금·쿠폰·회원 정보·자사몰 주문 조회 경로는 안내하지 않는다.";
+// 네이버 톡톡 상담의 응대 기준 — 구매처(고객이 말했거나 상담원이 고른 것, 없으면 톡톡 계정 기본값)에 따라 나눈다.
+// 스마트스토어 Yogibo 계정은 스마트스토어 고객만, 요기보 Yogibo 계정은 스마트스토어와 공식몰(네이버페이 결제 포함) 고객이 섞여 온다.
+const TALK_BASIS: Record<TalkPlace, string> = {
+  smartstore:
+    "응대 기준: 네이버 스마트스토어 — 스마트스토어 구매 고객으로 보고, 주문·배송·교환·반품·환불은 스마트스토어(네이버페이 주문) 기준으로 안내한다. 자사몰(요기보 공식몰) 전용 혜택·적립금·쿠폰·회원 정보·자사몰 주문 조회 경로는 안내하지 않는다.",
+  official:
+    "응대 기준: 요기보 공식몰(yogibo.kr) — 공식 홈페이지 구매 고객(네이버페이 결제 포함)으로 보고, 주문·배송·교환·반품·환불은 공식몰 기준으로 안내한다. 스마트스토어 전용 절차는 안내하지 않는다.",
+  "":
+    "응대 기준: 구매처 확인 필요 — 이 톡톡 계정에는 스마트스토어 고객과 요기보 공식몰(yogibo.kr, 네이버페이 결제 포함) 고객이 함께 들어온다. 주문·배송·교환·반품·환불처럼 구매처에 따라 안내가 달라지는 문의인데 고객이 구매처를 말하지 않았으면, 먼저 스마트스토어에서 구매했는지 요기보 공식 홈페이지에서 구매했는지 여쭤본다. 제품 사용법처럼 구매처와 상관없는 문의는 바로 답한다.",
+};
+
+const TALK_PLACE_TEXT: Record<TalkPlace, string> = {
+  smartstore: "네이버 스마트스토어",
+  official: "요기보 공식몰(네이버페이 결제 포함)",
+  "": "확인 필요(아직 모름)",
+};
 
 function isTalkChat(chat: LiveChatRecord) {
   return chat.source?.via === TALK_VIA;
 }
 
+// 톡톡 상담의 구매처 기준(톡톡이 아니면 빈 값)
+function talkPlaceOf(chat: LiveChatRecord): TalkPlace {
+  return isTalkChat(chat) ? resolveTalkPlace(chat.intake?.purchasePlace, chat.talk?.account ?? "") : "";
+}
+
 function describeChat(chat: LiveChatRecord) {
   const today = kstToday();
   const talk = isTalkChat(chat);
+  const place = talkPlaceOf(chat);
+  const placeText = talk
+    ? `${TALK_PLACE_TEXT[place]}${chat.intake?.purchasePlace ? "" : place ? " — 톡톡 계정 기준" : ""}`
+    : chat.intake?.purchasePlace
+      ? purchasePlaceLabel(chat.intake.purchasePlace)
+      : "미입력";
   const lines = [
     `오늘: ${dayLabel(today)} (${today})`,
     `유입 경로: ${chat.source?.via ? viaLabel(chat.source.via) : "알 수 없음"}${chat.source?.app ? ` (${appLabel(chat.source.app)})` : ""}`,
-    `구매처: ${chat.intake?.purchasePlace ? purchasePlaceLabel(chat.intake.purchasePlace) : talk ? "네이버 스마트스토어(톡톡 상담 기본값)" : "미입력"}`,
-    ...(talk ? [TALK_BASIS] : []),
+    `구매처: ${placeText}`,
+    ...(talk ? [TALK_BASIS[place]] : []),
     `문의 유형: ${chat.intake?.inquiryType || "미입력"}`,
     `주문번호: ${chat.intake?.orderNumber ? "고객이 입력함" : "없음"}`,
   ];
@@ -219,8 +245,8 @@ export async function buildAssistContext(chat: LiveChatRecord, messages: Transcr
     .map((message) => message.text)
     .join(" ");
   const { faqText, claimText, sources } = await findGrounds(
-    // 톡톡 상담은 스마트스토어 기준이라 스마트스토어를 다룬 FAQ·사례가 먼저 걸리게 한다.
-    [visitorText, question, chat.intake?.inquiryType ?? "", chat.entry?.faqQuestion ?? "", chat.talk?.productName ?? "", isTalkChat(chat) ? "스마트스토어" : ""].join(" "),
+    // 구매처가 스마트스토어인 톡톡 상담은 스마트스토어를 다룬 FAQ·사례가 먼저 걸리게 한다.
+    [visitorText, question, chat.intake?.inquiryType ?? "", chat.entry?.faqQuestion ?? "", chat.talk?.productName ?? "", talkPlaceOf(chat) === "smartstore" ? "스마트스토어" : ""].join(" "),
     chat.intake?.inquiryType ?? "",
     chat.entry?.faqId ?? "",
   );
@@ -301,14 +327,19 @@ type AssistTurn = { role: "user" | "assistant"; content: unknown };
 type ToolResult = { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
 
 export type AssistOrder = OrderCandidate & { label: string };
-// 주문 찾기 단서 — 고객이 쓴 글(사전 질문·대화·게시판 글)과 상담원 질문, 로그인 회원 ID
-export type OrderContext = { texts: string[]; memberId?: string };
+// 주문 찾기 단서 — 고객이 쓴 글(사전 질문·대화·게시판 글)과 상담원 질문, 로그인 회원 ID,
+// 구매처 기준(톡톡 상담 — 정해져 있으면 그 구매처에서만 찾는다)
+export type OrderContext = { texts: string[]; memberId?: string; place?: TalkPlace };
 // 채팅이냐 게시판이냐에 따라 초안 형식(지시문·요청 문구)이 다르다.
 export type AssistTarget = "chat" | "board";
 
 export function chatOrderContext(chat: LiveChatRecord, messages: TranscriptMessage[], question: string): OrderContext {
   const visitorTexts = messages.filter((message) => message.sender === "visitor").map((message) => message.text);
-  return { texts: [chat.intake?.orderNumber ?? "", question, ...visitorTexts], memberId: chat.memberId || undefined };
+  return {
+    texts: [chat.intake?.orderNumber ?? "", question, ...visitorTexts],
+    memberId: chat.memberId || undefined,
+    place: talkPlaceOf(chat) || undefined,
+  };
 }
 
 export function boardOrderContext(post: BoardPost, question: string): OrderContext {
@@ -530,15 +561,28 @@ async function runOrderTool(call: ContentBlock, context: OrderContext, orders: A
       if (!isCafe24Configured() && !isOnlineDataConfigured()) {
         return reply("주문 조회 연결 설정(cafe24·onlineData)이 없어 찾을 수 없어요. 상담원에게 cafe24 관리자·스마트스토어 판매자센터에서 직접 확인하라고 알려 주세요.", true);
       }
+      // 구매처 기준이 정해진 톡톡 상담은 그 구매처 주문만 — 스마트스토어면 스마트스토어 사본만(자사몰·매장 택배 빼고), 공식몰이면 자사몰만.
+      const { place } = context;
       const [mall, others] = await Promise.all([
-        fromSource(isCafe24Configured(), "자사몰(cafe24)", () => searchOrdersByName(search.name, search.from, search.to)),
-        fromSource(isOnlineDataConfigured(), "스마트스토어·매장 택배", () =>
-          searchOtherChannelOrders(search.name, search.from, search.to),
-        ),
+        place === "smartstore"
+          ? { found: [] as OrderCandidate[], note: "" }
+          : fromSource(isCafe24Configured(), "자사몰(cafe24)", () => searchOrdersByName(search.name, search.from, search.to)),
+        place === "official"
+          ? { found: [] as OrderCandidate[], note: "" }
+          : fromSource(isOnlineDataConfigured(), place === "smartstore" ? "스마트스토어" : "스마트스토어·매장 택배", () =>
+              searchOtherChannelOrders(search.name, search.from, search.to),
+            ),
       ]);
-      const notes = [mall.note, others.note].filter(Boolean);
+      const otherFound = place === "smartstore" ? others.found.filter((order) => order.channel === "스마트스토어") : others.found;
+      const scope =
+        place === "smartstore"
+          ? "구매처 기준이 스마트스토어라 스마트스토어 주문만 찾았어요(자사몰·매장 택배는 찾지 않음)."
+          : place === "official"
+            ? "구매처 기준이 요기보 공식몰이라 자사몰 주문만 찾았어요(스마트스토어·매장 택배는 찾지 않음)."
+            : "";
+      const notes = [scope, mall.note, others.note].filter(Boolean);
       return reply(
-        describeOrders(`이름 ${search.name} · 주문일 ${search.from} ~ ${search.to}`, labelOrders([...mall.found, ...others.found], orders), notes),
+        describeOrders(`이름 ${search.name} · 주문일 ${search.from} ~ ${search.to}`, labelOrders([...mall.found, ...otherFound], orders), notes),
       );
     }
     if (!isCafe24Configured()) {

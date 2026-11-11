@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { isValidObjectId, type Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { kstDateString } from "@/lib/liveChatHours";
+import { talkDefaultPlace } from "@/lib/talkPurchasePlace";
 import { LiveChat } from "@/models/LiveChat";
 import { LiveChatCounter } from "@/models/LiveChatCounter";
 import { LiveChatMessage } from "@/models/LiveChatMessage";
@@ -18,8 +19,8 @@ export const LIVE_CHAT_MESSAGES = {
   closedByAgent: "상담이 종료되었어요. 이용해 주셔서 감사합니다.",
   closedByVisitor: "고객님이 상담을 종료했어요.",
   reopened: "상담이 다시 열렸어요.",
-  // 톡톡 상담은 고객 화면이 없어 종료 안내가 고객에게 가지 않는다 — 상담원이 헷갈리지 않게 따로 적는다.
-  closedTalk: "상담을 종료했어요. 고객 톡톡에는 종료 안내가 가지 않고, 고객이 다시 메시지를 보내면 새 상담으로 들어와요.",
+  // 톡톡 상담 종료 때 고객 톡톡에 보내는 안내 — 상담원에게 남기는 결과 안내는 lib/naverTalk 의 talkClosedNote.
+  talkClosing: "상담이 종료되었어요. 이용해 주셔서 감사합니다. 더 궁금한 점이 있으면 언제든 메시지를 보내 주세요.",
 };
 
 // 운영시간 외 문의 접수 — 답변 안내 문자를 받을 휴대폰(010 등 휴대폰만, 숫자만 남김). 형식이 틀리면 "".
@@ -58,7 +59,7 @@ export type LiveChatRecord = {
     referrer?: string;
     param?: string;
   };
-  talk?: { user?: string; openUser?: string; productName?: string; productUrl?: string; account?: string };
+  talk?: { user?: string; openUser?: string; productName?: string; productUrl?: string; account?: string; threadOwner?: string };
   offHours?: boolean;
   contact?: { phone?: string; consentAt?: Date };
   notifiedAt?: Date;
@@ -144,7 +145,13 @@ export function adminView(chat: LiveChatRecord) {
       referrer: chat.source?.referrer ?? "",
       param: chat.source?.param ?? "",
     },
-    talk: { productName: chat.talk?.productName ?? "", productUrl: chat.talk?.productUrl ?? "", account: chat.talk?.account ?? "" },
+    talk: {
+      productName: chat.talk?.productName ?? "",
+      productUrl: chat.talk?.productUrl ?? "",
+      account: chat.talk?.account ?? "",
+      // 구매처를 아직 모를 때 쓰는 이 톡톡 계정의 기본값(스마트스토어 / 공식몰 / 빈 값 = 모름)
+      defaultPlace: chat.source?.via === "talktalk" ? talkDefaultPlace(chat.talk?.account ?? "") : "",
+    },
     offHours: Boolean(chat.offHours),
     contactPhone: chat.contact?.phone ?? "",
     notifiedAt: chat.notifiedAt?.toISOString() ?? "",

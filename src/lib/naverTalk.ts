@@ -4,7 +4,8 @@ import { getClientIp, inCidr } from "@/lib/ipBlock";
 import { appendMessage, createVisitorToken, type LiveChatRecord, nextTicketNo } from "@/lib/liveChat";
 import { todayClosureState } from "@/lib/liveChatClosures";
 import { isLiveChatOpen } from "@/lib/liveChatHours";
-import { TALK_PHOTO_PREFIX, TALK_VIA } from "@/lib/liveChatOptions";
+import { purchasePlaceLabel, TALK_PHOTO_PREFIX, TALK_VIA } from "@/lib/liveChatOptions";
+import { detectTalkPlace } from "@/lib/talkPurchasePlace";
 import { LiveChat } from "@/models/LiveChat";
 import { LiveChatBlock } from "@/models/LiveChatBlock";
 import { LiveChatMessage } from "@/models/LiveChatMessage";
@@ -15,7 +16,11 @@ import { LiveChatMessage } from "@/models/LiveChatMessage";
 //  보내기: POST https://gw.talk.naver.com/chatbot/v1/event + Authorization(파트너센터 [보내기 API]에서 만든 키)
 //  톡톡 요청에는 서명이 없어 주소의 비밀값으로 막고, NAVER_TALK_CHECK_IP=1 이면 네이버 IP 대역도 확인한다.
 //  지난 대화를 가져오는 API 는 없다 — 연결한 뒤 들어온 대화부터 쌓인다.
-// 문서: https://github.com/navertalk/chatbot-api
+//  핸드오버(NAVER_TALK_HANDOVER=1, 파트너센터 [개발자도구 > API 설정]에서 핸드오버 API 를 켠 계정만):
+//   대화의 주도권이 챗봇(이 프로그램)에 있으면 파트너센터에는 [완료]로, 파트너센터 상담원에게 있으면 [대기]·[진행중]으로 보인다.
+//   이 화면에서 종료하면 주도권을 가져와(takeThread) 파트너센터도 [완료]가 되게 하고,
+//   파트너센터에서 [상담 완료하기]를 누르면 오는 handover(passThread) 이벤트는 상담원에게 안내로 남긴다.
+// 문서: https://github.com/navertalk/chatbot-api (핸드오버: handover_v1.md)
 
 const SEND_URL = process.env.NAVER_TALK_API_URL || "https://gw.talk.naver.com/chatbot/v1/event";
 // 네이버가 웹훅을 보내는 IP 대역(챗봇 API 문서 기재값)
@@ -32,19 +37,28 @@ export type TalkEvent = {
   event: string;
   user: string;
   echoedEvent?: string;
+  // 핸드오버를 켠 계정에서 주도권이 파트너센터 상담원에게 있을 때 고객 메시지에 true 로 온다.
+  standby?: boolean;
   textContent?: { text?: string; inputType?: string };
   imageContent?: { imageUrl?: string };
   compositeContent?: { compositeList?: Array<{ title?: string; description?: string }> };
-  options?: { product?: { name?: string; url?: string } };
+  options?: {
+    product?: { name?: string; url?: string };
+    // echo: 지금 주도권을 가진 쪽(1 = 파트너센터 상담원, 그 밖의 숫자 = 챗봇)
+    threadOwnerId?: number;
+    // handover: passThread·takeThread 와 부가 정보(JSON 글, 예: {"managerNickname":"…","autoEnd":false})
+    control?: string;
+    metadata?: string;
+  };
 };
 
 export class TalkSendError extends Error {}
 
 // 연결한 톡톡 계정 — 톡톡 계정마다 받는 주소(비밀값)와 보내기 키가 따로다.
-//  첫 계정: NAVER_TALK_AUTH_KEY · NAVER_TALK_WEBHOOK_SECRET · NAVER_TALK_NAME(화면 이름, 선택)
-//  둘째 계정: 같은 이름 끝에 _2 (NAVER_TALK_AUTH_KEY_2 · NAVER_TALK_WEBHOOK_SECRET_2 · NAVER_TALK_NAME_2)
+//  첫 계정: NAVER_TALK_AUTH_KEY · NAVER_TALK_WEBHOOK_SECRET · NAVER_TALK_NAME(화면 이름, 선택) · NAVER_TALK_HANDOVER(=1 이면 핸드오버 사용)
+//  둘째 계정: 같은 이름 끝에 _2 (NAVER_TALK_AUTH_KEY_2 · NAVER_TALK_WEBHOOK_SECRET_2 · NAVER_TALK_NAME_2 · NAVER_TALK_HANDOVER_2)
 // 첫 계정 상담은 talk.account 가 비어 있고(예전 데이터 그대로), 둘째 계정 상담은 talk.account = "2".
-export type TalkAccount = { key: string; name: string; authKey: string; secret: string };
+export type TalkAccount = { key: string; name: string; authKey: string; secret: string; handover: boolean };
 
 const ACCOUNT_SLOTS = [
   { key: "", suffix: "", fallback: "네이버 톡톡" },
@@ -56,7 +70,15 @@ export function talkAccounts(): TalkAccount[] {
     const authKey = process.env[`NAVER_TALK_AUTH_KEY${suffix}`] ?? "";
     const secret = process.env[`NAVER_TALK_WEBHOOK_SECRET${suffix}`] ?? "";
     if (!authKey || secret.length < MIN_SECRET_LENGTH) return [];
-    return [{ key, name: process.env[`NAVER_TALK_NAME${suffix}`]?.trim() || fallback, authKey, secret }];
+    return [
+      {
+        key,
+        name: process.env[`NAVER_TALK_NAME${suffix}`]?.trim() || fallback,
+        authKey,
+        secret,
+        handover: process.env[`NAVER_TALK_HANDOVER${suffix}`] === "1",
+      },
+    ];
   });
 }
 
@@ -80,8 +102,13 @@ export function talkAccountBySecret(given: string) {
 }
 
 // 계정마다 진행 중 상담을 고객당 하나로 — 둘째 계정은 계정 이름을 앞에 붙여 첫 계정 고객과 섞이지 않게 한다.
+// (다시 열기도 같은 값을 써야 그 상담에 다음 메시지가 붙는다)
+export function talkOpenKey(accountKey: string, user: string) {
+  return accountKey ? `${accountKey}:${user}` : user;
+}
+
 function openKey(account: TalkAccount, user: string) {
-  return account.key ? `${account.key}:${user}` : user;
+  return talkOpenKey(account.key, user);
 }
 
 // 이 계정의 상담만 — 첫 계정 상담은 talk.account 가 없다.
@@ -150,6 +177,34 @@ async function findOpenTalkChat(account: TalkAccount, user: string) {
   return LiveChat.findOne({ "talk.openUser": openKey(account, user) }).lean<LiveChatRecord | null>();
 }
 
+// 핸드오버 — 대화 주도권이 파트너센터 상담원에게 있으면 talk.threadOwner = "partner", 이 프로그램(챗봇)에 있으면 비운다.
+// 실제로 바뀌었을 때만 true(같은 안내를 거듭 남기지 않게).
+async function markThreadOwner(chatId: LiveChatRecord["_id"], owner: "partner" | "") {
+  const changed = owner
+    ? await LiveChat.updateOne({ _id: chatId, "talk.threadOwner": { $ne: owner } }, { $set: { "talk.threadOwner": owner } })
+    : await LiveChat.updateOne({ _id: chatId, "talk.threadOwner": "partner" }, { $unset: { "talk.threadOwner": 1 } });
+  return changed.modifiedCount > 0;
+}
+
+const PARTNER_OWNED_NOTE =
+  "이 대화는 지금 톡톡 파트너센터 상담원이 맡고 있어요(파트너센터에 [대기]·[진행중]으로 보여요). 여기서 답해도 고객에게 가고, 이 화면에서 종료하면 파트너센터도 [완료]로 바뀌어요.";
+
+// handover 이벤트의 metadata — JSON 글이지만 문서 예시에 작은따옴표로 온 것도 있어 둘 다 읽는다.
+function handoverMeta(raw: string | undefined) {
+  for (const text of raw ? [raw, raw.replace(/'/g, '"')] : []) {
+    try {
+      const value = JSON.parse(text) as { managerNickname?: unknown; autoEnd?: unknown } | null;
+      if (value && typeof value === "object") {
+        const nickname = typeof value.managerNickname === "string" ? clip(value.managerNickname.trim(), 40) : "";
+        return { nickname, autoEnd: value.autoEnd === true };
+      }
+    } catch {
+      // 다음 형식으로 다시 읽는다
+    }
+  }
+  return { nickname: "", autoEnd: false };
+}
+
 // 새 톡톡 상담 — 그사이 같은 고객의 다른 메시지가 먼저 상담을 열었으면(고유 인덱스 충돌) 그 상담을 쓴다.
 async function openTalkChat(account: TalkAccount, user: string, status: "waiting" | "active" = "waiting") {
   const closure = await todayClosureState().catch(() => null);
@@ -190,6 +245,27 @@ export async function receiveTalkMessage(event: TalkEvent, account: TalkAccount)
     });
   }
   if (text) await appendMessage(chat._id, "visitor", text);
+  // standby = 핸드오버로 주도권이 파트너센터 상담원에게 가 있다는 뜻 — 상담원이 알 수 있게 한 번 남긴다.
+  if (event.standby === true && (await markThreadOwner(chat._id, "partner"))) {
+    await appendMessage(chat._id, "system", PARTNER_OWNED_NOTE);
+  }
+
+  // 고객이 구매처(스마트스토어 / 요기보 공식몰)를 말하면 상담에 적어 둔다 — AI 도우미가 그 기준으로 쓰고 그 구매처 주문만 찾는다.
+  // 이미 적힌 구매처(상담원이 고른 것 포함)는 바꾸지 않는다.
+  const place = detectTalkPlace(text);
+  if (place && !chat.intake?.purchasePlace) {
+    const noted = await LiveChat.updateOne(
+      { _id: chat._id, "intake.purchasePlace": { $in: [null, ""] } },
+      { $set: { "intake.purchasePlace": place } },
+    );
+    if (noted.modifiedCount) {
+      await appendMessage(
+        chat._id,
+        "system",
+        `고객이 말한 구매처를 '${purchasePlaceLabel(place)}'(으)로 적었어요. AI 도우미가 이 기준으로 쓰고 주문도 여기서만 찾아요. 다르면 오른쪽 [구매처]에서 바꿔 주세요.`,
+      );
+    }
+  }
 }
 
 // 톡톡이 되돌려 주는 '보낸 메시지' 사본 — 이 화면에서 보낸 답변이면 이미 대화에 있으니 전송 확인만 하고,
@@ -197,6 +273,14 @@ export async function receiveTalkMessage(event: TalkEvent, account: TalkAccount)
 export async function receiveTalkEcho(event: TalkEvent, account: TalkAccount) {
   await connectDB();
   await ensureTalkIndex();
+  // 핸드오버를 켠 계정은 사본에 지금 주도권을 가진 쪽(threadOwnerId, 1 = 파트너센터 상담원)이 온다 — 진행 중 상담에 적어 둔다.
+  const ownerId = event.options?.threadOwnerId;
+  if (typeof ownerId === "number") {
+    const open = await findOpenTalkChat(account, event.user);
+    if (open && (await markThreadOwner(open._id, ownerId === 1 ? "partner" : "")) && ownerId === 1) {
+      await appendMessage(open._id, "system", PARTNER_OWNED_NOTE);
+    }
+  }
   const text = talkMessageText(event);
   if (!text) return;
   const now = Date.now();
@@ -245,23 +329,106 @@ const SEND_ERRORS: Record<string, string> = {
   "02": "톡톡이 보낼 내용을 읽지 못했어요.",
 };
 
-// 고객 톡톡으로 글 보내기 — 그 상담이 들어온 계정의 보내기 키로. 톡톡은 실패도 HTTP 200 으로 주므로 success 를 본다.
-export async function sendTalkText(account: TalkAccount, user: string, text: string) {
+// 톡톡 보내기 API 호출 — 그 상담이 들어온 계정의 보내기 키로. 톡톡은 실패도 HTTP 200 으로 주므로 success 를 본다.
+async function postTalkEvent(
+  account: TalkAccount,
+  payload: Record<string, unknown>,
+  words = { unreachable: "네이버 톡톡에 연결하지 못했어요. 잠시 뒤 다시 보내 주세요.", rejected: "네이버 톡톡이 메시지를 받지 않았어요" },
+) {
   let response: Response;
   try {
     response = await fetch(SEND_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json;charset=UTF-8", Authorization: account.authKey },
-      body: JSON.stringify({ event: "send", user, textContent: { text } }),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(8000),
     });
   } catch {
-    throw new TalkSendError("네이버 톡톡에 연결하지 못했어요. 잠시 뒤 다시 보내 주세요.");
+    throw new TalkSendError(words.unreachable);
   }
   const body = (await response.json().catch(() => ({}))) as { success?: boolean; resultCode?: string; resultMessage?: string };
   if (response.ok && body.success === true) return;
   const detail = body.resultMessage ? ` (${clip(body.resultMessage, 120)})` : response.ok ? "" : ` (HTTP ${response.status})`;
-  throw new TalkSendError(SEND_ERRORS[body.resultCode ?? ""] ?? `네이버 톡톡이 메시지를 받지 않았어요${detail}.`);
+  throw new TalkSendError(SEND_ERRORS[body.resultCode ?? ""] ?? `${words.rejected}${detail}.`);
+}
+
+// 고객 톡톡으로 글 보내기
+export async function sendTalkText(account: TalkAccount, user: string, text: string) {
+  await postTalkEvent(account, { event: "send", user, textContent: { text } });
+}
+
+// 파트너센터 [상담 완료하기]를 누르면 오는 handover(passThread) — 주도권이 이 프로그램으로 돌아왔다.
+// 이 화면의 상담은 닫지 않고(상담원이 아직 볼 수 있게) 안내만 남긴다. 진행 중 상담이 없으면 할 일이 없다.
+export async function receiveTalkHandover(event: TalkEvent, account: TalkAccount) {
+  if (event.options?.control !== "passThread") return;
+  await connectDB();
+  const chat = await findOpenTalkChat(account, event.user);
+  if (!chat) return;
+  await markThreadOwner(chat._id, "");
+  const meta = handoverMeta(event.options.metadata);
+  const what = meta.autoEnd
+    ? "톡톡 파트너센터에서 상담이 자동으로 완료됐어요."
+    : `톡톡 파트너센터에서 ${meta.nickname ? `${meta.nickname} 님이 ` : ""}[상담 완료하기]를 눌렀어요.`;
+  await appendMessage(chat._id, "system", `${what} 이 화면의 상담은 그대로 열려 있어요 — 끝났으면 [종료]를 눌러 주세요.`);
+}
+
+export type TalkThreadResult = { state: "done" | "failed" | "off"; reason?: string };
+
+// 이 화면에서 종료할 때 — 핸드오버를 켠 계정이면 주도권을 가져와(takeThread) 파트너센터에도 [완료]로 보이게 한다.
+// 핸드오버를 안 켠 계정은 "off"(파트너센터 상태를 바꿀 방법이 없다).
+export async function takeTalkThread(chat: LiveChatRecord): Promise<TalkThreadResult> {
+  const user = chat.talk?.user;
+  const account = talkAccountByKey(chat.talk?.account ?? "");
+  if (!user || !account?.handover) return { state: "off" };
+  try {
+    await postTalkEvent(
+      account,
+      { event: "handover", user, options: { control: "takeThread", metadata: "" } },
+      { unreachable: "네이버 톡톡에 연결하지 못했어요.", rejected: "네이버 톡톡이 상담 완료 요청을 받지 않았어요" },
+    );
+  } catch (error) {
+    // 이미 이 프로그램이 주도권을 가진 대화(파트너센터 [완료])라 거절됐을 수 있다 — 상담원에게 넘어가 있던 대화만 실패로 알린다.
+    if (chat.talk?.threadOwner !== "partner") {
+      console.warn("[naver-talk] takeThread 거절 — 이미 이 프로그램이 맡은 대화로 봄", error instanceof Error ? error.message : error);
+      return { state: "done" };
+    }
+    return { state: "failed", reason: error instanceof TalkSendError ? error.message : "네이버 톡톡에 연결하지 못했어요." };
+  }
+  await markThreadOwner(chat._id, "");
+  return { state: "done" };
+}
+
+// 종료 뒤 상담원에게 남기는 안내 — 고객 톡톡 종료 안내를 보냈는지, 파트너센터 상태가 어떻게 됐는지.
+export function talkClosedNote(sent: boolean, thread: TalkThreadResult) {
+  const head = sent ? "상담을 종료하고 고객 톡톡에 종료 안내를 보냈어요." : "상담을 종료했지만 고객 톡톡에 종료 안내를 보내지 못했어요.";
+  const partner =
+    thread.state === "done"
+      ? " 톡톡 파트너센터에서도 [완료]로 보여요."
+      : thread.state === "failed"
+        ? ` 톡톡 파트너센터 상태는 바꾸지 못했어요 — ${thread.reason ?? ""} 파트너센터에서 [상담 완료하기]를 눌러 주세요.`
+        : " 톡톡 파트너센터의 상담 상태는 따로 바뀌지 않아요.";
+  return `${head}${partner} 고객이 다시 메시지를 보내면 새 상담으로 들어와요.`;
+}
+
+// 상담원이 종료할 때 고객 톡톡에 보내는 안내 — 톡톡에는 고객 대화를 끝내는 API 가 없어(핸드오버로는 파트너센터 상태만 바뀐다)
+// 고객이 끝난 걸 알 수 있게 글로 알린다. 대화에는 상담원 말풍선으로 남겨 톡톡 사본(echo)과 짝지어지게 한다
+// (짝이 없으면 파트너센터 메시지로 보고 상담을 다시 열기 때문). 상담 상태는 바꾸지 않는다. 보냈으면 true.
+export async function sendTalkClosing(chat: LiveChatRecord, text: string) {
+  const user = chat.talk?.user;
+  const account = talkAccountByKey(chat.talk?.account ?? "");
+  if (!user || !account) return false;
+  const result = await appendMessage(chat._id, "agent", text, {}, { talk: { state: "sending" } });
+  if (!result) return false;
+  const { seq } = result.message;
+  try {
+    await sendTalkText(account, user, text);
+    await LiveChatMessage.updateOne({ chatId: chat._id, seq }, { $set: { "talk.state": "sent" } });
+    return true;
+  } catch {
+    await LiveChatMessage.updateOne({ chatId: chat._id, seq, "talk.echoed": { $ne: true } }, { $set: { "talk.state": "failed" } });
+    const saved = await LiveChatMessage.findOne({ chatId: chat._id, seq }).lean<{ talk?: { state?: string } } | null>();
+    return saved?.talk?.state === "sent";
+  }
 }
 
 // 상담원 답변 — 대화에 먼저 '보내는 중'으로 남기고(톡톡 사본이 먼저 와도 짝을 찾게) 톡톡으로 보낸 뒤 결과를 적는다.

@@ -34,8 +34,21 @@ export type VoiceAnalysis = {
   sentiment: string;
 };
 
+// TWC(클라우드게이트)에서 가져온 지난 티켓의 원래 정보 — 녹음이 아니라 상담원이 남긴 티켓이다.
+export type TwcTicketInfo = {
+  ticketId: string;
+  brand: string;
+  channel: string;
+  status: string;
+  agent: string;
+  recordingFile: string;
+  sourceFiles?: string[];
+};
+
 export type VoiceCallRecord = {
   _id: Types.ObjectId;
+  source?: "recording" | "twc";
+  twc?: TwcTicketInfo;
   fileName: string;
   audioPath: string;
   dropboxPath?: string;
@@ -55,6 +68,18 @@ export type VoiceCallRecord = {
 export function serializeVoiceCall(call: VoiceCallRecord, { withTranscript = true } = {}) {
   return {
     id: String(call._id),
+    source: call.source ?? "recording",
+    // TWC 티켓 정보(원본 파일 경로는 화면에 필요 없어 뺀다)
+    twc: call.twc
+      ? {
+          ticketId: call.twc.ticketId,
+          brand: call.twc.brand,
+          channel: call.twc.channel,
+          status: call.twc.status,
+          agent: call.twc.agent,
+          recordingFile: call.twc.recordingFile,
+        }
+      : null,
     fileName: call.fileName,
     hasAudio: Boolean(call.audioPath || call.dropboxPath),
     // 원본 위치 — 드롭박스에 두었으면 그 경로(녹음 폴더 기준), 원본을 찾을 때 쓴다
@@ -110,13 +135,14 @@ export function parseRecordingFileName(name: string): { callDate?: Date; phoneNu
   return result;
 }
 
-// 드롭박스 보관 경로 — 녹음 폴더/통화일(KST)/시각_번호_원래이름. 통화일을 모르면 올린 때로.
+// 드롭박스 보관 경로 — 녹음 폴더/통화 연도(2026년)/통화일(KST)/시각_번호_원래이름. 통화일을 모르면 올린 때로.
+// 연도 폴더는 TWC 티켓 폴더(클라우드게이트 티켓/2026년)와 같은 방식이다.
 // 원래 이름에 번호가 이미 들어 있으면(LG U+ 녹음 파일 등) 번호를 또 붙이지 않는다.
 export function voiceDropboxPath(fileName: string, callDate?: Date, phoneNumber = "") {
   const kst = new Date((callDate ?? new Date()).getTime() + 9 * 3600_000).toISOString();
   const safeName = (fileName.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim() || "recording").slice(-120);
   const phone = phoneNumber && !safeName.replace(/[-.\s]/g, "").includes(phoneNumber) ? `${phoneNumber}_` : "";
-  return `${VOICE_FOLDER}/${kst.slice(0, 10)}/${kst.slice(11, 19).replace(/:/g, "")}_${phone}${safeName}`;
+  return `${VOICE_FOLDER}/${kst.slice(0, 4)}년/${kst.slice(0, 10)}/${kst.slice(11, 19).replace(/:/g, "")}_${phone}${safeName}`;
 }
 
 // 전사할 수 없는 파일이면 안내 문구를, 괜찮으면 빈 문자열을 돌려준다.

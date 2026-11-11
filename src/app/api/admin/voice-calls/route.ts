@@ -29,15 +29,21 @@ function escapeRegex(text: string) {
 }
 
 // 녹취 찾기 — 번호·이름·내용으로 검색한다(최근 100건). storage: 녹음을 어디에 두는지(화면의 올리기 방식).
+// source: recording(올린 녹음) · twc(TWC 지난 티켓) · 비우면 모두.
 export async function GET(request: Request) {
   const denied = await requireAdmin();
   if (denied) return denied;
   await connectDB();
 
-  const q = (new URL(request.url).searchParams.get("q") ?? "").trim();
+  const params = new URL(request.url).searchParams;
+  const q = (params.get("q") ?? "").trim();
+  const source = params.get("source");
   const digits = q.replace(/\D/g, "");
+  // 예전 녹취에는 source 가 없어 recording 은 'twc 가 아닌 것'으로 찾는다.
+  const sourceFilter = source === "twc" ? { source: "twc" } : source === "recording" ? { source: { $ne: "twc" } } : {};
   const filter = q
     ? {
+        ...sourceFilter,
         $or: [
           { phoneNumber: { $regex: escapeRegex(q.replace(/[-\s]/g, "")) } },
           // 통화 번호가 없어도 분석에서 나온 고객 연락처(010 1234 5678 처럼 적힌 것도)로 찾는다 — 고객 조회에서 넘어온 녹취
@@ -47,9 +53,12 @@ export async function GET(request: Request) {
           { "analysis.summary": { $regex: escapeRegex(q), $options: "i" } },
           { "analysis.customerName": { $regex: escapeRegex(q), $options: "i" } },
           { "analysis.category": { $regex: escapeRegex(q), $options: "i" } },
+          // TWC 티켓 — 메모와 티켓 ID(#yogibo_12345)
+          { "analysis.inquiry": { $regex: escapeRegex(q), $options: "i" } },
+          { "twc.ticketId": { $regex: escapeRegex(q), $options: "i" } },
         ],
       }
-    : {};
+    : sourceFilter;
 
   const calls = await VoiceCall.find(filter).sort({ createdAt: -1 }).limit(100).lean<VoiceCallRecord[]>();
   return NextResponse.json({
