@@ -32,7 +32,9 @@ export type BoardPost = {
   productName?: string;
   productOption?: string;
   orderId?: string;
-  attachments?: Array<{ name: string; url: string }>;
+  attachments?: Array<{ name: string; url: string }>; // 사진이 아닌 첨부 파일(링크로 보여 줌)
+  // 고객이 올린 사진 — 글 본문에 넣은 사진과 사진 첨부 파일(홈페이지). 화면에 작은 사진으로 보여 주고, 못 열면 링크로.
+  images?: Array<{ name: string; url: string }>;
   answered: boolean;
   answers: BoardAnswer[];
 };
@@ -158,6 +160,37 @@ export function htmlToText(html: string) {
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+// ── 게시글 사진 ──
+const IMAGE_FILE = /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)(?:[?#].*)?$/i;
+const MAX_POST_IMAGES = 20;
+
+// 파일 이름이나 주소로 본 사진 파일인가
+export function isImageFile(nameOrUrl: string) {
+  return IMAGE_FILE.test(nameOrUrl.trim());
+}
+
+// 게시글의 사진 주소를 브라우저가 바로 여는 https 주소로 — '/web/upload/…' 같은 쇼핑몰 안 주소는 shopOrigin 을 붙인다.
+//   data: 주소(글에 통째로 박힌 사진)와 알 수 없는 모양은 버린다.
+export function absoluteImageUrl(src: string, shopOrigin: string) {
+  const value = src.trim().replace(/&amp;/gi, "&");
+  if (!value || /^data:/i.test(value)) return "";
+  if (value.startsWith("//")) return `https:${value}`;
+  if (/^https?:\/\//i.test(value)) return value.replace(/^http:\/\//i, "https://");
+  if (!shopOrigin || /^[a-z][a-z0-9+.-]*:/i.test(value)) return "";
+  return `${shopOrigin}${value.startsWith("/") ? "" : "/"}${value}`;
+}
+
+// cafe24 게시글 HTML 본문에 넣은 사진(<img src>) — 평문으로 바꾸면 사라지므로 따로 뽑는다(같은 주소는 한 번만).
+export function htmlImageUrls(html: string, shopOrigin: string) {
+  const urls: string[] = [];
+  for (const match of html.matchAll(/<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
+    const url = absoluteImageUrl(match[1] ?? match[2] ?? match[3] ?? "", shopOrigin);
+    if (url && !urls.includes(url)) urls.push(url);
+    if (urls.length >= MAX_POST_IMAGES) break;
+  }
+  return urls;
 }
 
 // 상담원이 쓴 평문 답변 → cafe24 게시글 HTML(줄마다 문단, 빈 줄은 빈 문단 — cafe24 에디터와 같은 모양)

@@ -1,5 +1,14 @@
 import { Cafe24ApiError, cafe24Request } from "@/lib/cafe24/api";
-import { type BoardAnswer, type BoardPost, homepageBoard, htmlToText, textToHtml } from "@/lib/boards";
+import {
+  absoluteImageUrl,
+  type BoardAnswer,
+  type BoardPost,
+  homepageBoard,
+  htmlImageUrls,
+  htmlToText,
+  isImageFile,
+  textToHtml,
+} from "@/lib/boards";
 import { kstToday, shiftDay } from "@/lib/liveChatHours";
 
 // 홈페이지(cafe24) 게시판 — 글 목록(답글 포함)과 직원 답글 등록.
@@ -56,6 +65,20 @@ export function describeCafe24Error(error: unknown, action: "read" | "write") {
 }
 
 const minute = (value?: string | null) => (value ? value.slice(0, 16).replace("T", " ") : "");
+
+// 게시글 사진·첨부의 '/web/upload/…' 같은 쇼핑몰 안 주소를 열 때 붙이는 쇼핑몰 주소
+const SHOP_ORIGIN = process.env.CAFE24_MALLID ? `https://${process.env.CAFE24_MALLID}.cafe24.com` : "";
+
+// 고객이 올린 사진(본문에 넣은 사진 + 사진 첨부 파일)과 그 밖의 첨부 파일
+function postMedia(root: Cafe24Article) {
+  const files = (root.attached_file_detail ?? [])
+    .filter((file) => file.path)
+    .map((file) => ({ name: file.name || "첨부 파일", url: absoluteImageUrl(file.path ?? "", SHOP_ORIGIN) || (file.path ?? "") }));
+  const isImage = (file: { name: string; url: string }) => isImageFile(file.name) || isImageFile(file.url);
+  const images = htmlImageUrls(root.content ?? "", SHOP_ORIGIN).map((url, index) => ({ name: `글 속 사진 ${index + 1}`, url }));
+  for (const file of files.filter(isImage)) if (!images.some((image) => image.url === file.url)) images.push(file);
+  return { images, attachments: files.filter((file) => !isImage(file)) };
+}
 
 async function fetchArticles(boardNo: number, from: string, to: string) {
   const all: Cafe24Article[] = [];
@@ -120,9 +143,7 @@ function toPost(boardNo: number, root: Cafe24Article, replies: Cafe24Article[], 
     secret: root.secret === "T",
     productName: products.get(Number(root.product_no)) ?? "",
     orderId: root.order_id ?? "",
-    attachments: (root.attached_file_detail ?? [])
-      .filter((file) => file.path)
-      .map((file) => ({ name: file.name || "첨부 파일", url: file.path ?? "" })),
+    ...postMedia(root),
     // 관리자 화면에서 답을 달면 원글이 C(답변 완료)가 된다 — 답글이 기간 밖에 있어도 C 면 답변된 글
     answered: replies.length > 0 || root.reply_status === "C",
     answers: replies.sort((a, b) => a.article_no - b.article_no).map(toAnswer),

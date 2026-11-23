@@ -1,6 +1,19 @@
 "use client";
 
-import { ExternalLink, Loader2, Lock, MessageSquareReply, Paperclip, Pencil, RefreshCw, Search, Send, Sparkles, X } from "lucide-react";
+import {
+  ExternalLink,
+  Image as ImageIcon,
+  Loader2,
+  Lock,
+  MessageSquareReply,
+  Paperclip,
+  Pencil,
+  RefreshCw,
+  Search,
+  Send,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssistPanel } from "@/components/AssistPanel";
 import {
@@ -85,6 +98,24 @@ function readFrame(): AnswerFrame {
 }
 
 const appendParagraph = (base: string, text: string) => (base.trim() ? `${base.trimEnd()}\n\n${text}` : text);
+
+// 고객이 올린 사진 한 장 — 누르면 새 창에서 크게. 사진을 못 불러오면(로그인 필요한 첨부 등) 파일 링크로 바꿔 보여 준다.
+function PostImage({ image }: { image: { name: string; url: string } }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <a className="bd-image-link" href={image.url} target="_blank" rel="noreferrer">
+        <Paperclip size={13} /> {image.name}
+      </a>
+    );
+  }
+  return (
+    <a className="bd-image" href={image.url} target="_blank" rel="noreferrer" title={`${image.name} — 누르면 크게 보여요`}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- cafe24 에 올라간 고객 사진 주소를 그대로 보여 준다 */}
+      <img src={image.url} alt={image.name} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+    </a>
+  );
+}
 
 export function BoardManager() {
   const [folder, setFolder] = useState<BoardFolder>("homepage");
@@ -425,6 +456,11 @@ export function BoardManager() {
                 <p>{post.content || "(내용 없음)"}</p>
                 <div className="bd-item-tags">
                   <span className={`bd-chip ${chip.tone}`}>{chip.label}</span>
+                  {(post.images ?? []).length > 0 && (
+                    <span className="bd-chip is-muted">
+                      <ImageIcon size={11} /> 사진 {post.images?.length}
+                    </span>
+                  )}
                   {post.category && <span className="bd-chip is-muted">{post.category}</span>}
                   {post.productName && <span className="bd-chip is-muted bd-product">{post.productName}</span>}
                   {post.writer && <span className="bd-writer">{post.writer}</span>}
@@ -470,7 +506,14 @@ export function BoardManager() {
               <div className="bd-detail-main">
                 <div className="bd-card">
                   <h3>{selected.folder === "smartstore" ? "문의 내용" : "글 내용"}</h3>
-                  <p>{selected.content || "(내용 없음)"}</p>
+                  <p>{selected.content || ((selected.images ?? []).length ? "" : "(내용 없음)")}</p>
+                  {(selected.images ?? []).length > 0 && (
+                    <div className="bd-images" aria-label={`고객이 올린 사진 ${selected.images?.length}장`}>
+                      {selected.images?.map((image) => (
+                        <PostImage key={image.url} image={image} />
+                      ))}
+                    </div>
+                  )}
                   {(selected.attachments ?? []).length > 0 && (
                     <ul className="bd-files">
                       {selected.attachments?.map((file) => (
