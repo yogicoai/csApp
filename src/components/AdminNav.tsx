@@ -23,7 +23,7 @@ import { AdminPasswordButton } from "@/components/AdminPasswordButton";
 import { BOARDS_CHANGED_EVENT } from "@/lib/boards";
 import { type LiveChatClosureInfo, useLiveChatClosure, useLiveChatHoursOpen } from "@/components/LiveChat";
 import { LIVE_CHAT_HOURS_LABEL } from "@/lib/liveChatHours";
-import { TALK_VIA } from "@/lib/liveChatOptions";
+import { KAKAO_VIA, TALK_VIA } from "@/lib/liveChatOptions";
 
 const POLL_MS = 10_000;
 const BOARD_POLL_MS = 5 * 60_000;
@@ -118,6 +118,7 @@ export function AdminNav() {
   // 실시간 상담 배지 — 대기 상담 + 안 읽은 메시지 수(그중 네이버 톡톡은 아래 [네이버 톡톡]에도 따로)
   const [chatCount, setChatCount] = useState<number | null>(null);
   const [talkCount, setTalkCount] = useState<number | null>(null);
+  const [kakaoCount, setKakaoCount] = useState<number | null>(null);
   const [boardCount, setBoardCount] = useState<number | null>(null);
   const [soundOn, setSoundOn] = useState(true);
   // 사이드바 접힘 — 상담할 때 화면을 넓게 쓰도록 아이콘만 남긴다(브라우저에 기억)
@@ -125,6 +126,7 @@ export function AdminNav() {
   const [notifTick, setNotifTick] = useState(0);
   const prevCountRef = useRef<number | null>(null);
   const prevTalkRef = useRef<number | null>(null);
+  const prevKakaoRef = useRef<number | null>(null);
   const pathRef = useRef(pathname);
   const soundRef = useRef(true);
 
@@ -159,36 +161,54 @@ export function AdminNav() {
         const response = await fetch("/api/admin/live-chats", { cache: "no-store" });
         if (!response.ok) return;
         const body = (await response.json()) as {
-          counts?: { waiting: number; unread: number; talk?: { waiting: number; unread: number } };
+          counts?: {
+            waiting: number;
+            unread: number;
+            talk?: { waiting: number; unread: number };
+            kakao?: { waiting: number; unread: number };
+          };
         };
         if (!alive || !body.counts) return;
         const next = body.counts.waiting + body.counts.unread;
         const talk = body.counts.talk ? body.counts.talk.waiting + body.counts.talk.unread : 0;
+        const kakao = body.counts.kakao ? body.counts.kakao.waiting + body.counts.kakao.unread : 0;
         setChatCount(next);
         setTalkCount(talk);
+        setKakaoCount(kakao);
 
         // 수가 늘었을 때만 알린다(처음 로드는 기준값으로만 쓴다). 늘어난 게 톡톡이면 톡톡이라고 알린다.
         const prev = prevCountRef.current;
         const prevTalk = prevTalkRef.current;
+        const prevKakao = prevKakaoRef.current;
         prevCountRef.current = next;
         prevTalkRef.current = talk;
+        prevKakaoRef.current = kakao;
         if (prev === null || next <= prev) return;
         const fromTalk = prevTalk !== null && talk > prevTalk;
+        const fromKakao = prevKakao !== null && kakao > prevKakao;
 
         // 콘솔 화면은 자체 알림음이 있으므로, 다른 화면이거나 창이 숨겨져 있을 때만 알린다.
         const away = document.hidden || !pathRef.current.startsWith("/admin/live-chat");
         if (!away) return;
         if (soundRef.current) playChime();
         if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-          const notification = new Notification(fromTalk ? "요기보 네이버 톡톡" : "요기보 실시간 상담", {
-            body: fromTalk
-              ? `네이버 톡톡 새 문의·메시지가 있어요(대기·안 읽음 ${talk}건). 눌러서 바로 답변하세요.`
-              : `대기·안 읽은 메시지가 ${next}건 있어요. 눌러서 바로 답변하세요.`,
+          const notification = new Notification(
+            fromKakao ? "요기보 카카오 상담톡" : fromTalk ? "요기보 네이버 톡톡" : "요기보 실시간 상담",
+            {
+              body: fromKakao
+                ? `카카오 상담톡 새 문의·메시지가 있어요(대기·안 읽음 ${kakao}건). 눌러서 바로 답변하세요.`
+                : fromTalk
+                  ? `네이버 톡톡 새 문의·메시지가 있어요(대기·안 읽음 ${talk}건). 눌러서 바로 답변하세요.`
+                  : `대기·안 읽은 메시지가 ${next}건 있어요. 눌러서 바로 답변하세요.`,
             tag: "cs-live-chat",
           });
           notification.onclick = () => {
             window.focus();
-            window.location.href = fromTalk ? `/admin/live-chat?via=${TALK_VIA}` : "/admin/live-chat";
+            window.location.href = fromKakao
+              ? `/admin/live-chat?via=${KAKAO_VIA}`
+              : fromTalk
+                ? `/admin/live-chat?via=${TALK_VIA}`
+                : "/admin/live-chat";
           };
         }
       } catch {
@@ -335,6 +355,12 @@ export function AdminNav() {
                 <Link href={`/admin/live-chat?via=${TALK_VIA}`} className="admin-nav-sub">
                   <span className="admin-nav-label">네이버 톡톡</span>
                   {talkCount ? <span className="unanswered-count">{talkCount}</span> : null}
+                </Link>
+              )}
+              {item.href === "/admin/live-chat" && !collapsed && (
+                <Link href={`/admin/live-chat?via=${KAKAO_VIA}`} className="admin-nav-sub">
+                  <span className="admin-nav-label">카카오 상담톡</span>
+                  {kakaoCount ? <span className="unanswered-count">{kakaoCount}</span> : null}
                 </Link>
               )}
               {!collapsed &&

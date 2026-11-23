@@ -10,7 +10,7 @@ import {
 import type { LiveChatRecord } from "@/lib/liveChat";
 import { dayLabel, kstToday, shiftDay } from "@/lib/liveChatHours";
 import { isOnlineDataConfigured, searchOtherChannelOrders } from "@/lib/onlineData";
-import { appLabel, purchasePlaceLabel, TALK_VIA, viaLabel } from "@/lib/liveChatOptions";
+import { appLabel, KAKAO_VIA, purchasePlaceLabel, TALK_VIA, viaLabel } from "@/lib/liveChatOptions";
 import { maskPersonalInfo } from "@/lib/pii";
 import { getLiveClaims, type ClaimItem } from "@/lib/repositories/claimRepository";
 import { getPublishedFaqs } from "@/lib/repositories/faqRepository";
@@ -178,19 +178,32 @@ const TALK_BASIS: Record<TalkPlace, string> = {
     "응대 기준: 구매처 확인 필요 — 이 톡톡 계정에는 스마트스토어 고객과 요기보 공식몰(yogibo.kr, 네이버페이 결제 포함) 고객이 함께 들어온다. 주문·배송·교환·반품·환불처럼 구매처에 따라 안내가 달라지는 문의인데 고객이 구매처를 말하지 않았으면, 먼저 스마트스토어에서 구매했는지 요기보 공식 홈페이지에서 구매했는지 여쭤본다. 제품 사용법처럼 구매처와 상관없는 문의는 바로 답한다.",
 };
 
+// 카카오 상담톡(yogibo 채널)에서 구매처를 모를 때 — 공식몰 고객이 많지만 스마트스토어·카카오톡 스토어 고객도 들어온다.
+const KAKAO_UNKNOWN_BASIS =
+  "응대 기준: 구매처 확인 필요 — 카카오톡 채널 상담에는 요기보 공식몰(yogibo.kr) 고객뿐 아니라 네이버 스마트스토어·카카오톡 스토어 등 다른 곳에서 산 고객도 들어온다. 주문·배송·교환·반품·환불처럼 구매처에 따라 안내가 달라지는 문의인데 고객이 구매처를 말하지 않았으면, 먼저 어디서 구매했는지(요기보 공식 홈페이지·네이버 스마트스토어·카카오톡 스토어 등) 여쭤본다. 제품 사용법처럼 구매처와 상관없는 문의는 바로 답한다.";
+
 const TALK_PLACE_TEXT: Record<TalkPlace, string> = {
   smartstore: "네이버 스마트스토어",
   official: "요기보 공식몰(네이버페이 결제 포함)",
   "": "확인 필요(아직 모름)",
 };
 
-function isTalkChat(chat: LiveChatRecord) {
-  return chat.source?.via === TALK_VIA;
+function isKakaoChat(chat: LiveChatRecord) {
+  return chat.source?.via === KAKAO_VIA;
 }
 
-// 톡톡 상담의 구매처 기준(톡톡이 아니면 빈 값)
+// 메신저(네이버 톡톡·카카오 상담톡) 상담 — 구매처 기준으로 쓰고 그 구매처 주문만 찾는다.
+function isTalkChat(chat: LiveChatRecord) {
+  return chat.source?.via === TALK_VIA || isKakaoChat(chat);
+}
+
+// 메신저 상담의 구매처 기준(메신저가 아니면 빈 값). 톡톡은 계정 기본값이 있고, 카카오는 고객이 말했거나 상담원이 고른 것만.
 function talkPlaceOf(chat: LiveChatRecord): TalkPlace {
-  return isTalkChat(chat) ? resolveTalkPlace(chat.intake?.purchasePlace, chat.talk?.account ?? "") : "";
+  if (isKakaoChat(chat)) {
+    const place = chat.intake?.purchasePlace;
+    return place === "smartstore" || place === "official" ? place : "";
+  }
+  return chat.source?.via === TALK_VIA ? resolveTalkPlace(chat.intake?.purchasePlace, chat.talk?.account ?? "") : "";
 }
 
 function describeChat(chat: LiveChatRecord) {
@@ -198,21 +211,23 @@ function describeChat(chat: LiveChatRecord) {
   const talk = isTalkChat(chat);
   const place = talkPlaceOf(chat);
   const placeText = talk
-    ? `${TALK_PLACE_TEXT[place]}${chat.intake?.purchasePlace ? "" : place ? " — 톡톡 계정 기준" : ""}`
+    ? `${TALK_PLACE_TEXT[place]}${chat.intake?.purchasePlace || isKakaoChat(chat) ? "" : place ? " — 톡톡 계정 기준" : ""}`
     : chat.intake?.purchasePlace
       ? purchasePlaceLabel(chat.intake.purchasePlace)
       : "미입력";
+  const basis = isKakaoChat(chat) && !place ? KAKAO_UNKNOWN_BASIS : TALK_BASIS[place];
   const lines = [
     `오늘: ${dayLabel(today)} (${today})`,
     `유입 경로: ${chat.source?.via ? viaLabel(chat.source.via) : "알 수 없음"}${chat.source?.app ? ` (${appLabel(chat.source.app)})` : ""}`,
     `구매처: ${placeText}`,
-    ...(talk ? [TALK_BASIS[place]] : []),
+    ...(talk ? [basis] : []),
     `문의 유형: ${chat.intake?.inquiryType || "미입력"}`,
     `주문번호: ${chat.intake?.orderNumber ? "고객이 입력함" : "없음"}`,
   ];
   if (chat.entry?.faqQuestion) lines.push(`고객이 보던 FAQ: ${chat.entry.faqQuestion}`);
   if (chat.entry?.aiQuery) lines.push(`고객이 AI에게 한 질문: ${chat.entry.aiQuery}`);
   if (chat.talk?.productName) lines.push(`톡톡 문의를 시작한 상품 페이지: ${chat.talk.productName}`);
+  if (chat.kakao?.extra) lines.push(`카카오 상담을 시작한 곳(상담 연결 링크에 심은 값): ${chat.kakao.extra}`);
   if (chat.offHours) lines.push("운영시간 외에 접수된 상담");
   return lines.join("\n");
 }

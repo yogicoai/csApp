@@ -14,7 +14,7 @@ import {
 import { connectDB } from "@/lib/db";
 import { type LiveChatRecord, NOT_DELETED } from "@/lib/liveChat";
 import { kstToday, shiftDay } from "@/lib/liveChatHours";
-import { TALK_VIA } from "@/lib/liveChatOptions";
+import { KAKAO_VIA, TALK_VIA } from "@/lib/liveChatOptions";
 import { isOnlineDataConfigured, searchOtherChannelOrdersByPhone } from "@/lib/onlineData";
 import { formatPhone, phoneTextPattern } from "@/lib/phone";
 import type { VoiceCallRecord } from "@/lib/voiceCall";
@@ -50,6 +50,8 @@ export type LookupChat = {
   id: string;
   ticketNo: string;
   talk: boolean;
+  // 카카오 상담톡 상담
+  kakao?: boolean;
   status: string;
   outcome: string;
   createdAt: string;
@@ -273,7 +275,7 @@ export async function lookupCustomer(digits: string): Promise<CustomerLookup> {
     posts = { state: "ok", items, note: "스마트스토어 문의는 연락처가 없어 여기 나오지 않아요." };
   }
 
-  // 3) 상담 — 문의 접수 휴대폰·회원 ID·대화에 적힌 번호·찾은 주문번호·블랙컨슈머로 등록한 톡톡 고객
+  // 3) 상담 — 문의 접수 휴대폰·카카오 상담에서 동의받은 번호·회원 ID·대화에 적힌 번호·찾은 주문번호·블랙컨슈머로 등록한 톡톡 고객
   const orderIds = unique([...mallOrders.items, ...otherOrders.items].map((order) => order.orderId));
   const talkUsers = unique(blackEntries.map((entry) => entry.talkUser ?? ""));
   const messageChatIds = (await LiveChatMessage.distinct("chatId", { text: { $regex: textPattern }, ...NOT_DELETED })).map(String);
@@ -281,6 +283,7 @@ export async function lookupCustomer(digits: string): Promise<CustomerLookup> {
     ...NOT_DELETED,
     $or: [
       { "contact.phone": digits },
+      { "kakao.phone": digits },
       { _id: { $in: messageChatIds } },
       ...(memberIds.length ? [{ memberId: { $in: memberIds } }] : []),
       ...(orderIds.length ? [{ "intake.orderNumber": { $in: orderIds } }] : []),
@@ -295,6 +298,7 @@ export async function lookupCustomer(digits: string): Promise<CustomerLookup> {
     id: String(chat._id),
     ticketNo: chat.ticketNo ?? "",
     talk: chat.source?.via === TALK_VIA,
+    kakao: chat.source?.via === KAKAO_VIA,
     status: chat.status,
     outcome: chat.outcome?.result ?? "",
     createdAt: chat.createdAt?.toISOString() ?? "",
@@ -302,6 +306,7 @@ export async function lookupCustomer(digits: string): Promise<CustomerLookup> {
     preview: chat.lastMessagePreview ?? "",
     matchedBy: [
       chat.contact?.phone === digits && "문의 접수 연락처",
+      chat.kakao?.phone === digits && "카카오 상담에서 받은 번호",
       messageChatIds.includes(String(chat._id)) && "대화에 적힌 번호",
       chat.memberId && memberIds.includes(chat.memberId) && "회원 ID",
       chat.intake?.orderNumber && orderIds.includes(chat.intake.orderNumber) && "주문번호",

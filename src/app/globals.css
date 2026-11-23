@@ -7259,6 +7259,12 @@ body:has(.guide-shell--ownmall) {
   color: #7c2d12;
 }
 
+/* 카카오에서 보낸 뒤 지운 메시지 — 흐리게, 줄을 그어 */
+.lc-msg .lc-bubble.is-deleted {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
 .lc-photo {
   display: grid;
   gap: 4px;

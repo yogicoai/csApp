@@ -60,6 +60,15 @@ export type LiveChatRecord = {
     param?: string;
   };
   talk?: { user?: string; openUser?: string; productName?: string; productUrl?: string; account?: string; threadOwner?: string };
+  kakao?: {
+    userKey?: string;
+    openUser?: string;
+    extra?: string;
+    phone?: string;
+    nickname?: string;
+    consentedAt?: Date;
+    phoneRequestedAt?: Date;
+  };
   offHours?: boolean;
   contact?: { phone?: string; consentAt?: Date };
   notifiedAt?: Date;
@@ -84,7 +93,7 @@ type LiveChatMessageRecord = {
   sender: LiveChatSender;
   text: string;
   createdAt?: Date;
-  talk?: { state?: string; partner?: boolean };
+  talk?: { state?: string; partner?: boolean; deleted?: boolean };
 };
 
 export function createVisitorToken() {
@@ -108,9 +117,11 @@ export function serializeMessage(doc: LiveChatMessageRecord) {
     sender: doc.sender,
     text: doc.text,
     createdAt: (doc.createdAt ?? new Date()).toISOString(),
-    // 톡톡 상담에만 붙는다 — delivery: 톡톡으로 보내는 중·보냄·못 보냄, partner: 톡톡 파트너센터에서 보낸 메시지
+    // 메신저(톡톡·카카오) 상담에만 붙는다 — delivery: 메신저로 보내는 중·보냄·못 보냄, partner: 다른 곳(톡톡 파트너센터·톡브릿지)에서 보낸 메시지,
+    // deleted: 보낸 뒤 지워진 메시지(카카오)
     ...(doc.talk?.state ? { delivery: doc.talk.state } : {}),
     ...(doc.talk?.partner ? { partner: true } : {}),
+    ...(doc.talk?.deleted ? { deleted: true } : {}),
   };
 }
 
@@ -151,6 +162,13 @@ export function adminView(chat: LiveChatRecord) {
       account: chat.talk?.account ?? "",
       // 구매처를 아직 모를 때 쓰는 이 톡톡 계정의 기본값(스마트스토어 / 공식몰 / 빈 값 = 모름)
       defaultPlace: chat.source?.via === "talktalk" ? talkDefaultPlace(chat.talk?.account ?? "") : "",
+    },
+    // 카카오 상담톡 — 들어온 곳(상담 연결 링크에 심은 값), 고객이 동의해 받은 전화번호·닉네임, 전화번호를 요청한 때
+    kakao: {
+      extra: chat.kakao?.extra ?? "",
+      phone: chat.kakao?.phone ?? "",
+      nickname: chat.kakao?.nickname ?? "",
+      phoneRequestedAt: chat.kakao?.phoneRequestedAt?.toISOString() ?? "",
     },
     offHours: Boolean(chat.offHours),
     contactPhone: chat.contact?.phone ?? "",
@@ -231,12 +249,13 @@ export async function findVisitorChat(request: Request, id: string) {
   return chat;
 }
 
-// 스팸 차단 키 — 회원ID(자사몰 로그인)와 같은 브라우저 세션, 톡톡 상담은 톡톡 사용자
-export function spamBlockKeys(chat: { memberId?: string; sessionId?: string; talk?: { user?: string } }) {
+// 스팸 차단 키 — 회원ID(자사몰 로그인)와 같은 브라우저 세션, 톡톡 상담은 톡톡 사용자, 카카오 상담은 카카오 고객 키
+export function spamBlockKeys(chat: { memberId?: string; sessionId?: string; talk?: { user?: string }; kakao?: { userKey?: string } }) {
   return [
     chat.memberId && `member:${chat.memberId}`,
     chat.sessionId && `session:${chat.sessionId}`,
     chat.talk?.user && `talk:${chat.talk.user}`,
+    chat.kakao?.userKey && `kakao:${chat.kakao.userKey}`,
   ].filter((key): key is string => Boolean(key));
 }
 

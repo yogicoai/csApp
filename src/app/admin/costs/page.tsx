@@ -18,9 +18,10 @@ const AFTER_ROWS: Row[] = [
   { item: "LG U+ ARS + 안내 멘트", detail: "녹음 고지·폭언 금지 안내, 1번 챗봇 / 0번 상담사", amount: "7,480원" },
   { item: "U+ 통화매니저 + 자동 녹음", detail: "전화 오면 고객 정보·메모·블랙 표시, 녹음 12개월", amount: "12,100원" },
   { item: "링크 문자", detail: "월 약 240건(장문 30원)", amount: "7,140원" },
-  { item: "챗봇 AI 사용료", detail: "대화당 약 10원", amount: "2,380원" },
-  { item: "AI 요약·답변 초안", detail: "녹음 받아쓰기 + 요약(최대)", amount: "5,000원" },
-  { item: "녹음 보관", detail: "회사 드롭박스 11_고객지원/음성 상담 녹음, 3년(약 10~20GB)", amount: "0원" },
+  // LG U+ 에 내는 금액만 적는다 — 아래 세 줄은 LG U+ 요금이 아니라 금액을 비워 둔다(합계에서도 뺌).
+  { item: "챗봇 AI 사용료", detail: "대화당 약 10원 — LG U+ 요금 아님(AI 회사에 따로 냄)", amount: "—" },
+  { item: "AI 요약·답변 초안", detail: "녹음 받아쓰기 + 요약 — LG U+ 요금 아님(AI 회사에 따로 냄)", amount: "—" },
+  { item: "녹음 보관", detail: "회사 드롭박스 11_고객지원/음성 상담 녹음, 3년(약 10~20GB) — LG U+ 요금 아님", amount: "—" },
   { item: "고객에게 거는 전화", detail: "지금 TWC 통화료 평균 그대로", amount: "12,252원" },
 ];
 
@@ -147,7 +148,8 @@ export default async function AdminCostsPage() {
           <PhoneCall size={20} />
           <h2>바꾼 뒤 (① LG U+ 유지안, 월)</h2>
         </div>
-        <CostTable rows={AFTER_ROWS} total="46,352원 (부가세 포함 추정)" />
+        <CostTable rows={AFTER_ROWS} total="38,972원 (LG U+ 요금만, 부가세 포함 추정)" />
+        <p className="cost-note">합계는 LG U+ 에 내는 금액만 더했어요. 챗봇 AI·AI 요약(월 최대 약 7,380원)은 AI 회사에 따로 내는 사용료라 뺐어요. 위 &lsquo;한눈에&rsquo;의 월 약 46,000원은 이 사용료까지 더한 금액이에요.</p>
         <p className="cost-note">LG U+ 회선 기본료는 지금도 따로 내고 있어요. 고급형 센트릭스로 바꿔야 하면 기본료가 달라질 수 있어 견적으로 확인해요(최악의 경우에도 절감 월 약 19.6만 원).</p>
       </section>
 

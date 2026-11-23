@@ -8,12 +8,17 @@ const liveChatMessageSchema = new Schema(
     seq: { type: Number, required: true },
     sender: { type: String, enum: ["visitor", "agent", "system"], required: true },
     text: { type: String, required: true },
-    // 네이버 톡톡 상담의 상담원 메시지 — state: 톡톡으로 보내는 중·보냄·못 보냄, echoed: 톡톡이 되돌려 준 사본(echo)을 받음,
-    // partner: 이 화면이 아니라 톡톡 파트너센터(앱 포함)에서 직원이 직접 보낸 메시지.
+    // 메신저(네이버 톡톡·카카오 상담톡) 상담의 메시지 — state: 메신저로 보내는 중·보냄·못 보냄, echoed: 메신저가 되돌려 준 사본(echo)을 받음,
+    // partner: 이 화면이 아니라 톡톡 파트너센터(앱 포함)·톡브릿지 등 다른 곳에서 직원이 직접 보낸 메시지.
+    // 카카오만: serial = 톡브릿지 발신 번호(사본·삭제와 짝짓기), seq = 톡브릿지 저널 번호(같은 고객 메시지를 두 번 넣지 않게),
+    //  deleted = 보낸 뒤 지워진 메시지.
     talk: {
       state: { type: String, enum: ["sending", "sent", "failed"] },
       echoed: { type: Boolean },
       partner: { type: Boolean },
+      serial: { type: String },
+      seq: { type: Number },
+      deleted: { type: Boolean },
     },
     // 대화방이 휴지통으로 가면 같이 표시되어, 대화방과 같은 시점에 TTL 로 영구 삭제된다.
     deletedAt: { type: Date },

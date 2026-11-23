@@ -5,7 +5,7 @@ import type React from "react";
 import { useEffect, useState } from "react";
 import type { ChatSummary, Snippet } from "@/components/AdminLiveChat";
 import { AssistPanel, type Shipment, shipmentStatusLabel, shippingText } from "@/components/AssistPanel";
-import { appLabel, DEFAULT_SNIPPETS, outcomeLabel, purchasePlaceLabel, TALK_VIA, viaLabel } from "@/lib/liveChatOptions";
+import { appLabel, isMessengerVia, outcomeLabel, purchasePlaceLabel, sortSnippets, viaLabel } from "@/lib/liveChatOptions";
 
 // 실시간 채팅상담 콘솔 오른쪽 '상담 도움' — 탭 3개.
 //  AI 도우미(기본): 대화를 보고 고객 안내 문구 초안을 만들거나, 상담원 질문에 근거와 함께 답한다.
@@ -52,14 +52,16 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 
 type AdminLiveChatAssistProps = {
   chat: ChatSummary;
+  // 기본 문구까지 모두 들어 있는 목록. 서버에서 불러오지 못했으면 기본 문구만 오고 snippetsEditable 이 false(고치기·지우기·추가 숨김).
   snippets: Snippet[];
+  snippetsEditable: boolean;
   onSnippetsChange: React.Dispatch<React.SetStateAction<Snippet[]>>;
   onInsert: (text: string) => void;
   // 이전 상담을 누르면 콘솔에서 그 상담을 연다.
   onOpenChat: (chat: ChatSummary) => void;
 };
 
-export function AdminLiveChatAssist({ chat, snippets, onSnippetsChange, onInsert, onOpenChat }: AdminLiveChatAssistProps) {
+export function AdminLiveChatAssist({ chat, snippets, snippetsEditable, onSnippetsChange, onInsert, onOpenChat }: AdminLiveChatAssistProps) {
   const [tab, setTab] = useState<Tab>("ai");
   const [related, setRelated] = useState<ChatSummary[] | null>(null);
   const [relatedNote, setRelatedNote] = useState("");
@@ -154,7 +156,7 @@ export function AdminLiveChatAssist({ chat, snippets, onSnippetsChange, onInsert
         return;
       }
       const saved = body.snippet as Snippet;
-      onSnippetsChange((prev) => (isNew ? [saved, ...prev] : prev.map((item) => (item.id === saved.id ? saved : item))));
+      onSnippetsChange((prev) => sortSnippets(isNew ? [saved, ...prev] : prev.map((item) => (item.id === saved.id ? saved : item))));
       setEditing(null);
     } catch {
       setSnippetError("문구를 저장하지 못했습니다.");
@@ -176,15 +178,15 @@ export function AdminLiveChatAssist({ chat, snippets, onSnippetsChange, onInsert
   }
 
   const query = snippetQuery.trim().toLowerCase();
-  const defaultSnippets = DEFAULT_SNIPPETS.filter((snippet) => matches(query, snippet));
-  const customSnippets = snippets.filter((snippet) => matches(query, snippet));
+  const shownSnippets = snippets.filter((snippet) => matches(query, snippet));
   const source = chat.source;
   const sourceText = source.via
     ? [viaLabel(source.via), source.app ? appLabel(source.app) : "", source.parentOrigin.replace(/^https?:\/\//, "")]
         .filter(Boolean)
         .join(" · ")
     : "기록 없음";
-  const isTalk = source.via === TALK_VIA;
+  // 메신저(톡톡·카카오) 상담 — 구매처 기준으로 AI 도우미가 쓰고 주문을 찾는다.
+  const isTalk = isMessengerVia(source.via);
   const place = placeSaved && placeSaved.base === chat.intake.purchasePlace ? placeSaved.value : chat.intake.purchasePlace;
   const defaultPlace = chat.talk.defaultPlace ?? "";
   // AI 도우미가 실제로 쓰는 기준 — 스마트스토어·공식몰만 기준이 되고, 그 밖의 값은 모름
@@ -333,9 +335,11 @@ export function AdminLiveChatAssist({ chat, snippets, onSnippetsChange, onInsert
               <Search size={14} />
               <input value={snippetQuery} onChange={(event) => setSnippetQuery(event.target.value)} placeholder="문구 검색" />
             </label>
-            <button type="button" className="lc-assist-link" onClick={() => setEditing({ id: "", title: "", body: "" })}>
-              <Plus size={13} /> 문구 추가
-            </button>
+            {snippetsEditable && (
+              <button type="button" className="lc-assist-link" onClick={() => setEditing({ id: "", title: "", body: "" })}>
+                <Plus size={13} /> 문구 추가
+              </button>
+            )}
           </div>
           {editing && (
             <form className="lc-snippet-form" onSubmit={saveSnippet}>
@@ -364,29 +368,24 @@ export function AdminLiveChatAssist({ chat, snippets, onSnippetsChange, onInsert
           )}
           {snippetError && <p className="lc-error">{snippetError}</p>}
           <p className="lc-assist-note">누르면 답변창에 들어가요. 답변창 위 빠른 문구에도 같은 목록이 보여요.</p>
+          {!snippetsEditable && <p className="lc-assist-note">문구 목록을 불러오지 못해 기본 문구만 보여요. 새로고침하면 고치고 지울 수 있어요.</p>}
           <ul className="lc-snippets">
-            {defaultSnippets.map((snippet) => (
-              <li key={`default-${snippet.title}`}>
+            {shownSnippets.map((snippet) => (
+              <li key={snippet.id || `default-${snippet.defaultKey}`} className={snippet.id ? "is-custom" : undefined}>
                 <button type="button" className="lc-snippet" onClick={() => onInsert(snippet.body)}>
                   <strong>{snippet.title}</strong>
                   <span>{snippet.body}</span>
                 </button>
-              </li>
-            ))}
-            {customSnippets.map((snippet) => (
-              <li key={snippet.id} className="is-custom">
-                <button type="button" className="lc-snippet" onClick={() => onInsert(snippet.body)}>
-                  <strong>{snippet.title}</strong>
-                  <span>{snippet.body}</span>
-                </button>
-                <div className="lc-snippet-actions">
-                  <button type="button" aria-label="수정" onClick={() => setEditing({ ...snippet })}>
-                    <Pencil size={13} />
-                  </button>
-                  <button type="button" aria-label="삭제" onClick={() => void deleteSnippet(snippet)}>
-                    <Trash2 size={13} />
-                  </button>
-                </div>
+                {snippet.id && (
+                  <div className="lc-snippet-actions">
+                    <button type="button" aria-label="수정" onClick={() => setEditing({ id: snippet.id, title: snippet.title, body: snippet.body })}>
+                      <Pencil size={13} />
+                    </button>
+                    <button type="button" aria-label="삭제" onClick={() => void deleteSnippet(snippet)}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

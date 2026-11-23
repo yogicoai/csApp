@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/adminAuth";
 import { adminView, appendMessage, findChatById, LIVE_CHAT_MAX_TEXT } from "@/lib/liveChat";
-import { TALK_VIA } from "@/lib/liveChatOptions";
+import { isKakaoConfigured, KakaoSendError, replyByKakao } from "@/lib/kakaoTalk";
+import { KAKAO_VIA, TALK_VIA } from "@/lib/liveChatOptions";
 import { isNaverTalkConfigured, replyByTalk, TalkSendError } from "@/lib/naverTalk";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -35,6 +36,22 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ message: sent.message, chat: adminView(sent.chat) }, { status: 201 });
     } catch (error) {
       if (error instanceof TalkSendError) return NextResponse.json({ error: error.message }, { status: 409 });
+      throw error;
+    }
+  }
+
+  // 카카오 상담톡 — 답변을 고객 카카오톡으로 보낸다(톡브릿지). 못 보낸 답변도 대화에 '못 보냄'으로 남겨 함께 돌려준다.
+  if (chat.source?.via === KAKAO_VIA) {
+    if (!isKakaoConfigured()) {
+      return NextResponse.json({ error: "카카오 상담톡(톡브릿지) 연결 설정이 없어 답변을 보낼 수 없어요." }, { status: 409 });
+    }
+    try {
+      const sent = await replyByKakao(chat, parsed.data.text);
+      if (!sent) return NextResponse.json({ error: "상담을 찾을 수 없습니다." }, { status: 404 });
+      if (!sent.ok) return NextResponse.json({ error: sent.error, message: sent.message }, { status: 502 });
+      return NextResponse.json({ message: sent.message, chat: adminView(sent.chat) }, { status: 201 });
+    } catch (error) {
+      if (error instanceof KakaoSendError) return NextResponse.json({ error: error.message }, { status: 409 });
       throw error;
     }
   }

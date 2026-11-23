@@ -283,7 +283,9 @@ export function CustomerLookup({ initialPhone }: { initialPhone: string }) {
                       <Link href={`/admin/live-chat?${new URLSearchParams({ q: chat.ticketNo, chat: chat.id })}`}>
                         <span className="cu-item-top">
                           <strong>{chat.ticketNo || "상담"}</strong>
-                          <span className={chat.talk ? "cu-chip is-talk" : "cu-chip"}>{chat.talk ? "네이버 톡톡" : "셀프가이드"}</span>
+                          <span className={chat.talk || chat.kakao ? "cu-chip is-talk" : "cu-chip"}>
+                            {chat.kakao ? "카카오 상담톡" : chat.talk ? "네이버 톡톡" : "셀프가이드"}
+                          </span>
                           <span>{chat.status === "closed" ? outcomeLabel(chat.outcome) || "종료" : STATUS_LABEL[chat.status] ?? chat.status}</span>
                           <time>{kstText(chat.createdAt, true)}</time>
                         </span>

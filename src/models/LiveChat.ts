@@ -53,6 +53,19 @@ const liveChatSchema = new Schema(
       // 핸드오버를 켠 계정에서 대화 주도권이 톡톡 파트너센터 상담원에게 있으면 "partner"(이 프로그램에 있으면 없음).
       threadOwner: { type: String },
     },
+    // 카카오 상담톡(source.via = "kakaochat", 톡브릿지) — userKey 는 카카오가 채널별로 주는 고객 키(답장할 때만 쓰고 화면에는 내보내지 않는다).
+    // openUser 는 진행 중(대기·상담중)일 때만 userKey 와 같은 값 — 고유 인덱스로 고객마다 진행 중 상담을 하나로 막는다(lib/kakaoTalk 가 만든다).
+    // extra: 상담 연결 링크·버튼·챗봇에 심어 둔 값(어디서 들어왔는지) / phone·nickname·consentedAt: 고객이 개인정보 제공에 동의해 받은 값.
+    kakao: {
+      userKey: { type: String },
+      openUser: { type: String },
+      extra: { type: String },
+      phone: { type: String },
+      nickname: { type: String },
+      consentedAt: { type: Date },
+      // 전화번호(개인정보 동의)를 요청한 때 — 상담 세션당 한 번만 보낼 수 있다.
+      phoneRequestedAt: { type: Date },
+    },
     // 운영시간 외·휴무 시간에 받은 상담 — 실시간 대화 대신 '문의 접수'로 받는다.
     offHours: { type: Boolean, default: false },
     // 문의 접수 때 받은 답변 안내용 휴대폰과 개인정보 수집·이용 동의 시각.

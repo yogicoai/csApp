@@ -6,8 +6,14 @@ export const snippetSchema = z.object({
   body: z.string().trim().min(1).max(1000),
 });
 
-export type SnippetDoc = { _id: unknown; title: string; body: string; updatedAt?: Date };
+export type SnippetDoc = { _id: unknown; title: string; body: string; defaultKey?: string; updatedAt?: Date };
 
 export function serializeSnippet(doc: SnippetDoc) {
-  return { id: String(doc._id), title: doc.title, body: doc.body, updatedAt: doc.updatedAt?.toISOString() ?? "" };
+  return {
+    id: String(doc._id),
+    title: doc.title,
+    body: doc.body,
+    defaultKey: doc.defaultKey ?? "",
+    updatedAt: doc.updatedAt?.toISOString() ?? "",
+  };
 }

@@ -15,10 +15,12 @@ import {
   CHAT_OUTCOME_KEYS,
   DELETE_REASON_KEYS,
   type DeleteReason,
+  KAKAO_VIA,
   PURCHASE_PLACE_KEYS,
   SPAM_BLOCK_DAYS,
   TALK_VIA,
 } from "@/lib/liveChatOptions";
+import { endKakaoChat, kakaoClosedNote } from "@/lib/kakaoTalk";
 import { sendTalkClosing, takeTalkThread, talkClosedNote, talkOpenKey } from "@/lib/naverTalk";
 import { LiveChat } from "@/models/LiveChat";
 import { LiveChatBlock } from "@/models/LiveChatBlock";
@@ -89,13 +91,20 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   if (status === "closed") {
     // 상태가 실제로 바뀔 때만 종료 안내를 남긴다(중복 클릭 방지). 이미 고객이 종료했다면 결과만 기록한다.
-    // 톡톡 상담은 진행 중 표시(talk.openUser)도 지워, 고객이 다시 보내면 새 상담이 열리게 한다.
+    // 톡톡·카카오 상담은 진행 중 표시(openUser)도 지워, 고객이 다시 보내면 새 상담이 열리게 한다.
     const changed = await LiveChat.updateOne(
       { _id: chat._id, status: { $ne: "closed" } },
-      { $set: { status: "closed", closedAt: new Date(), closedBy: "agent", ...outcomeSet }, $unset: { "talk.openUser": 1 } },
+      {
+        $set: { status: "closed", closedAt: new Date(), closedBy: "agent", ...outcomeSet },
+        $unset: { "talk.openUser": 1, "kakao.openUser": 1 },
+      },
     );
     if (changed.modifiedCount) {
-      if (chat.source?.via === TALK_VIA) {
+      if (chat.source?.via === KAKAO_VIA) {
+        // 카카오는 종료 API 가 있어 카카오 상담도 끝낸다(종료 인사말을 보낸 뒤 끝남). 못 끝내도 이 화면에서는 종료된다.
+        const ended = await endKakaoChat(chat, LIVE_CHAT_MESSAGES.talkClosing);
+        await appendMessage(chat._id, "system", kakaoClosedNote(ended));
+      } else if (chat.source?.via === TALK_VIA) {
         // 핸드오버를 켠 계정이면 먼저 주도권을 가져와 파트너센터도 [완료]로 바꾸고(파트너센터 상담원이 맡고 있던 대화 포함),
         // 고객 톡톡에 종료 안내를 보낸다. 둘 다 못 해도 종료는 되고, 결과는 상담원에게 안내로 남긴다.
         const thread = await takeTalkThread(chat);
@@ -110,7 +119,11 @@ export async function PATCH(request: Request, context: RouteContext) {
   } else if (status === "active") {
     // 톡톡 고객은 진행 중 상담이 하나만(고유 인덱스) — 그사이 새 메시지로 새 상담이 열렸으면 그쪽에서 잇는다.
     // 둘째 계정 상담은 진행 중 표시에 계정 key 가 붙는다(lib/naverTalk 와 같은 값이어야 다음 메시지가 이 상담에 붙는다).
-    const talkOpen = chat.talk?.user ? { "talk.openUser": talkOpenKey(chat.talk.account ?? "", chat.talk.user) } : {};
+    const talkOpen = chat.talk?.user
+      ? { "talk.openUser": talkOpenKey(chat.talk.account ?? "", chat.talk.user) }
+      : chat.kakao?.userKey
+        ? { "kakao.openUser": chat.kakao.userKey }
+        : {};
     const changed = await LiveChat.updateOne(
       { _id: chat._id, status: "closed" },
       { $set: { status: "active", closedBy: "", ...talkOpen }, $unset: { closedAt: 1, outcome: 1 } },
@@ -119,7 +132,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       throw error;
     });
     if (!changed) {
-      return NextResponse.json({ error: "이 고객의 새 톡톡 상담이 진행 중이에요. 그 상담에서 이어서 답해 주세요." }, { status: 409 });
+      const name = chat.source?.via === KAKAO_VIA ? "카카오" : "톡톡";
+      return NextResponse.json({ error: `이 고객의 새 ${name} 상담이 진행 중이에요. 그 상담에서 이어서 답해 주세요.` }, { status: 409 });
     }
     if (changed.modifiedCount) {
       await appendMessage(chat._id, "system", LIVE_CHAT_MESSAGES.reopened);

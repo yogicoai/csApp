@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Loader2,
   MessageCircle,
+  Phone,
   RotateCcw,
   Search,
   Send,
@@ -31,6 +32,9 @@ import {
   DELETE_REASONS,
   type DeleteReason,
   deleteReasonLabel,
+  isMessengerVia,
+  KAKAO_VIA,
+  messengerName,
   outcomeLabel,
   purchasePlaceLabel,
   TALK_PHOTO_PREFIX,
@@ -45,7 +49,8 @@ import {
 // 진행 중 상담과 후속 조치·미분류는 처리할 일이라 날짜와 상관없이 보이고, 날짜는 종료 상담 이력과 통계에 적용된다.
 // 서버리스 배포라 웹소켓 대신 폴링으로 갱신한다(목록 4초, 열어 둔 대화 2.5초, 통계 15초).
 
-export type Snippet = { id: string; title: string; body: string };
+// defaultKey: 기본 문구로 처음 넣은 문구(고치고 지울 수 있다). 불러오기 전·실패 때 보여 주는 기본 문구는 id 가 비어 있다.
+export type Snippet = { id: string; title: string; body: string; defaultKey?: string; updatedAt?: string };
 
 // 연결한 톡톡 계정(이름만 — 키·비밀값은 서버에만)
 type TalkAccountName = { key: string; name: string };
@@ -63,6 +68,8 @@ export type ChatSummary = {
   // 네이버 톡톡 상담이 '톡톡문의'로 시작된 상품 페이지
   // defaultPlace — 구매처를 모를 때 쓰는 그 톡톡 계정의 기본값(smartstore | official | 빈 값 = 모름)
   talk: { productName: string; productUrl: string; account: string; defaultPlace?: string };
+  // 카카오 상담톡 — 들어온 곳(상담 연결 링크에 심은 값), 고객이 동의해 받은 전화번호·닉네임, 전화번호를 요청한 때
+  kakao?: { extra: string; phone: string; nickname: string; phoneRequestedAt: string };
   offHours: boolean;
   // 운영시간 외 문의 접수 때 받은 휴대폰(답변 안내 문자용)과 문자를 보낸 때
   contactPhone: string;
@@ -81,7 +88,7 @@ export type ChatSummary = {
   deleteReason: string;
   assetClaimId: string;
 };
-// delivery·partner 는 톡톡 상담에만 — 톡톡으로 보내는 중·보냄·못 보냄 / 톡톡 파트너센터에서 직접 보낸 메시지
+// delivery·partner·deleted 는 메신저(톡톡·카카오) 상담에만 — 보내는 중·보냄·못 보냄 / 다른 곳(톡톡 파트너센터·톡브릿지)에서 보낸 메시지 / 보낸 뒤 지워진 메시지
 type ChatMessage = {
   seq: number;
   sender: "visitor" | "agent" | "system";
@@ -89,6 +96,7 @@ type ChatMessage = {
   createdAt: string;
   delivery?: "sending" | "sent" | "failed";
   partner?: boolean;
+  deleted?: boolean;
 };
 type Counts = {
   waiting: number;
@@ -98,6 +106,7 @@ type Counts = {
   unclassified: number;
   trash: number;
   talk: { waiting: number; unread: number };
+  kakao: { waiting: number; unread: number };
   // 거르기와 상관없는 전체 — 알림·탭 제목은 이 값으로(거르기를 바꿔도 소리가 나거나 빠지지 않게)
   all: { waiting: number; unread: number };
 };
@@ -110,14 +119,16 @@ const EMPTY_COUNTS: Counts = {
   unclassified: 0,
   trash: 0,
   talk: { waiting: 0, unread: 0 },
+  kakao: { waiting: 0, unread: 0 },
   all: { waiting: 0, unread: 0 },
 };
 
-// 경로로 거르기 — 왼쪽 메뉴의 [네이버 톡톡]은 ?via=talktalk 로 이 거르기를 켠 채 연다.
+// 경로로 거르기 — 왼쪽 메뉴의 [네이버 톡톡]·[카카오 상담톡]은 ?via=talktalk · ?via=kakaochat 로 이 거르기를 켠 채 연다.
 const VIA_FILTERS: Array<{ key: string; label: string }> = [
   { key: "", label: "전체" },
   { key: "web", label: "셀프가이드" },
   { key: TALK_VIA, label: "네이버 톡톡" },
+  { key: KAKAO_VIA, label: "카카오 상담톡" },
 ];
 
 // 처리할 일이 남은 거르기와 휴지통 — 날짜와 상관없이 전체를 본다(서버도 같은 규칙).
@@ -264,18 +275,30 @@ function contextChips(chat: ChatSummary, talkAccounts: TalkAccountName[] = []) {
   if (talk && chat.talk.productName) {
     chips.push({ label: "상품", value: clipText(chat.talk.productName, 28), href: chat.talk.productUrl || undefined });
   }
+  if (chat.source.via === KAKAO_VIA && chat.kakao) {
+    if (chat.kakao.extra) chips.push({ label: "들어온 곳", value: clipText(chat.kakao.extra, 28) });
+    if (chat.kakao.nickname) chips.push({ label: "닉네임", value: clipText(chat.kakao.nickname, 20) });
+    if (chat.kakao.phone) chips.push({ label: "전화", value: formatPhoneText(chat.kakao.phone) });
+  }
   if (chat.intake.purchasePlace) chips.push({ label: "구매처", value: purchasePlaceLabel(chat.intake.purchasePlace) });
   if (chat.intake.inquiryType) chips.push({ label: "유형", value: chat.intake.inquiryType });
   if (chat.intake.orderNumber) chips.push({ label: "주문번호", value: chat.intake.orderNumber });
   if (chat.entry.faqQuestion) chips.push({ label: "보던 FAQ", value: clipText(chat.entry.faqQuestion, 28) });
   else if (chat.entry.aiQuery) chips.push({ label: "AI 질문", value: clipText(chat.entry.aiQuery, 28) });
   if (chat.offHours) chips.push({ label: "접수", value: "운영시간 외" });
-  // 톡톡 상담은 셀프가이드 사전 질문을 거치지 않는다.
-  if (!talk && !chat.intake.purchasePlace && !chat.intake.inquiryType) chips.push({ label: "사전 질문", value: "없음" });
+  // 톡톡·카카오 상담은 셀프가이드 사전 질문을 거치지 않는다.
+  if (!isMessengerVia(chat.source.via) && !chat.intake.purchasePlace && !chat.intake.inquiryType) {
+    chips.push({ label: "사전 질문", value: "없음" });
+  }
   return chips;
 }
 
-// 톡톡 고객이 보낸 사진("[사진] <주소>")은 사진으로 보여 주고, 누르면 원본을 새 창에서 연다.
+// 휴대폰 번호 숫자 → 010-1234-5678(그 밖은 그대로)
+function formatPhoneText(digits: string) {
+  return /^01\d{8,9}$/.test(digits) ? digits.replace(/^(\d{3})(\d{3,4})(\d{4})$/, "$1-$2-$3") : digits;
+}
+
+// 톡톡·카카오 고객이 보낸 사진("[사진] <주소>")은 사진으로 보여 주고, 누르면 원본을 새 창에서 연다.
 function MessageText({ text }: { text: string }) {
   const url = text.startsWith(TALK_PHOTO_PREFIX) ? text.slice(TALK_PHOTO_PREFIX.length).trim() : "";
   if (!/^https?:\/\//.test(url)) return <>{text}</>;
@@ -409,6 +432,10 @@ export function AdminLiveChat({
   // 네이버 톡톡 연결 설정 여부(서버 환경변수) — 톡톡 거르기에서 아직 연결 전이면 안내한다.
   const [talkConnected, setTalkConnected] = useState<boolean | null>(null);
   const [talkAccounts, setTalkAccounts] = useState<TalkAccountName[]>([]);
+  // 카카오 상담톡(톡브릿지) 연결 설정 여부 — 카카오 거르기에서 아직 연결 전이면 안내한다.
+  const [kakaoConnected, setKakaoConnected] = useState<boolean | null>(null);
+  // 카카오 전화번호 요청 중
+  const [phoneBusy, setPhoneBusy] = useState(false);
   // 날짜 바 — 고른 날의 종료 상담 이력과 일별 통계(진행 중·후속 조치·미분류는 날짜와 상관없이 전체).
   const [today, setToday] = useState(kstToday);
   const [day, setDay] = useState(kstToday);
@@ -441,7 +468,12 @@ export function AdminLiveChat({
   const [assetBusy, setAssetBusy] = useState(false);
   const [assetError, setAssetError] = useState("");
   // 자주 쓰는 답변 — 답변창 위 빠른 문구와 오른쪽 탭이 같은 목록을 쓴다(콘솔을 열 때 한 번 불러옴).
+  // 기본 문구도 서버 목록에 들어 있다. 불러오기 전이나 실패했을 때만 기본 문구를 고칠 수 없는 채로 보여 준다.
   const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [snippetsLoaded, setSnippetsLoaded] = useState(false);
+  const shownSnippets: Snippet[] = snippetsLoaded
+    ? snippets
+    : DEFAULT_SNIPPETS.map((snippet) => ({ id: "", title: snippet.title, body: snippet.body, defaultKey: snippet.key }));
   // 서버 렌더에는 Notification 이 없으므로 외부 스토어로 읽고, 권한 요청 뒤에는 그 응답을 쓴다.
   const permission = useSyncExternalStore(subscribeNothing, readNotifyPermission, () => "unsupported" as NotifyState);
   const [answered, setAnswered] = useState<NotifyState | null>(null);
@@ -450,10 +482,12 @@ export function AdminLiveChat({
   const lastSeqRef = useRef(0);
   const prevAlertRef = useRef<number | null>(null);
   const prevTalkAlertRef = useRef<number | null>(null);
+  const prevKakaoAlertRef = useRef<number | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const replyRef = useRef<HTMLTextAreaElement>(null);
   const alertCount = counts.all.waiting + counts.all.unread;
   const talkAlertCount = counts.talk.waiting + counts.talk.unread;
+  const kakaoAlertCount = counts.kakao.waiting + counts.kakao.unread;
   const closed = selected?.status === "closed";
   const caution = selected ? (selectedCaution === undefined ? (cautions[selected.id] ?? null) : selectedCaution) : null;
 
@@ -484,6 +518,7 @@ export function AdminLiveChat({
       setCounts({ ...EMPTY_COUNTS, ...body.counts });
       setTalkConnected(typeof body.talkConnected === "boolean" ? body.talkConnected : null);
       setTalkAccounts(Array.isArray(body.talkAccounts) ? body.talkAccounts : []);
+      setKakaoConnected(typeof body.kakaoConnected === "boolean" ? body.kakaoConnected : null);
       setListMode(body.mode === "search" ? "search" : "list");
       setLoadedAt(Date.now());
       setListLoaded(true);
@@ -584,9 +619,11 @@ export function AdminLiveChat({
         const response = await fetch("/api/admin/live-chat-snippets", { cache: "no-store" });
         if (!response.ok) return;
         const body = (await response.json()) as { snippets?: Snippet[] };
-        if (alive) setSnippets(body.snippets ?? []);
+        if (!alive) return;
+        setSnippets(body.snippets ?? []);
+        setSnippetsLoaded(true);
       } catch {
-        // 불러오지 못해도 기본 문구는 쓸 수 있다.
+        // 불러오지 못해도 기본 문구는 쓸 수 있다(shownSnippets).
       }
     })();
     return () => {
@@ -606,15 +643,24 @@ export function AdminLiveChat({
     document.title = alertCount > 0 ? `(${alertCount}) ${PAGE_TITLE}` : PAGE_TITLE;
     const prev = prevAlertRef.current;
     const prevTalk = prevTalkAlertRef.current;
+    const prevKakao = prevKakaoAlertRef.current;
     prevAlertRef.current = alertCount;
     prevTalkAlertRef.current = talkAlertCount;
+    prevKakaoAlertRef.current = kakaoAlertCount;
     if (prev === null || alertCount <= prev) return;
     beep();
     if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
       const fromTalk = prevTalk !== null && talkAlertCount > prevTalk;
-      new Notification(PAGE_TITLE, { body: fromTalk ? "네이버 톡톡 새 메시지가 도착했어요." : "새 상담 메시지가 도착했어요." });
+      const fromKakao = prevKakao !== null && kakaoAlertCount > prevKakao;
+      new Notification(PAGE_TITLE, {
+        body: fromKakao
+          ? "카카오 상담톡 새 메시지가 도착했어요."
+          : fromTalk
+            ? "네이버 톡톡 새 메시지가 도착했어요."
+            : "새 상담 메시지가 도착했어요.",
+      });
     }
-  }, [alertCount, talkAlertCount]);
+  }, [alertCount, talkAlertCount, kakaoAlertCount]);
 
   const selectChat = useCallback((chat: ChatSummary) => {
     if (chat.id === selectedRef.current) return;
@@ -708,6 +754,28 @@ export function AdminLiveChat({
     } catch {
       setChatError("상태를 바꾸지 못했습니다.");
       return false;
+    }
+  }
+
+  // 카카오 상담 — 고객에게 전화번호 제공 동의를 요청한다(상담당 한 번). 동의하면 번호가 대화와 '전화' 칩에 남는다.
+  async function requestPhone() {
+    const id = selectedId;
+    if (!id || phoneBusy) return;
+    setPhoneBusy(true);
+    setChatError("");
+    try {
+      const response = await fetch(`/api/admin/live-chats/${id}/kakao-phone`, { method: "POST" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setChatError(body.error ?? "전화번호를 요청하지 못했어요.");
+        return;
+      }
+      if (selectedRef.current === id && body.chat) setSelected(body.chat);
+      void loadChat(id);
+    } catch {
+      setChatError("전화번호를 요청하지 못했어요.");
+    } finally {
+      setPhoneBusy(false);
     }
   }
 
@@ -904,7 +972,12 @@ export function AdminLiveChat({
           </div>
           <div className="lc-filter lc-via" aria-label="들어온 곳으로 거르기">
             {VIA_FILTERS.map((filter) => {
-              const count = filter.key === TALK_VIA ? counts.talk.waiting + counts.talk.unread : 0;
+              const count =
+                filter.key === TALK_VIA
+                  ? counts.talk.waiting + counts.talk.unread
+                  : filter.key === KAKAO_VIA
+                    ? counts.kakao.waiting + counts.kakao.unread
+                    : 0;
               return (
                 <button
                   type="button"
@@ -919,6 +992,12 @@ export function AdminLiveChat({
               );
             })}
           </div>
+          {via === KAKAO_VIA && kakaoConnected === false && (
+            <p className="lc-talk-off">
+              카카오 상담톡이 아직 연결되지 않았어요. 톡브릿지를 연결하면 카카오톡 채널로 온 상담이 여기로 들어오고, 여기서 쓴 답이 고객 카카오톡으로
+              가요.
+            </p>
+          )}
           {via === TALK_VIA && talkConnected === false && (
             <p className="lc-talk-off">
               네이버 톡톡이 아직 연결되지 않았어요. 연결하면 톡톡으로 온 문의가 여기로 들어오고, 여기서 쓴 답이 고객 톡톡으로 가요.
@@ -1053,8 +1132,8 @@ export function AdminLiveChat({
                     <span className={`lc-chip ${statusChip(selected).className}`}>{statusChip(selected).label}</span>
                     <strong>{originLabel(selected)} 고객</strong>
                     {selected.ticketNo && <span className="lc-ticket">{selected.ticketNo}</span>}
-                    {/* 톡톡 고객은 이 화면을 보지 않아 접속 여부를 알 수 없다 */}
-                    {!closed && selected.source.via !== TALK_VIA && (
+                    {/* 톡톡·카카오 고객은 이 화면을 보지 않아 접속 여부를 알 수 없다 */}
+                    {!closed && !isMessengerVia(selected.source.via) && (
                       <span className={selected.visitorOnline ? "lc-presence is-online" : "lc-presence"}>
                         {selected.visitorOnline ? "접속 중" : "오프라인"}
                       </span>
@@ -1142,10 +1221,23 @@ export function AdminLiveChat({
                       </button>
                     </>
                   ) : (
-                    <button type="button" className="is-danger" onClick={() => openOutcomePicker("close")}>
-                      <CheckCircle2 size={15} />
-                      상담 종료
-                    </button>
+                    <>
+                      {selected.source.via === KAKAO_VIA && !selected.kakao?.phone && (
+                        <button
+                          type="button"
+                          disabled={phoneBusy || Boolean(selected.kakao?.phoneRequestedAt)}
+                          title="고객 카카오톡에 '개인정보 제공 동의' 말풍선을 보내요. 고객이 동의하면 카카오에 등록된 전화번호가 여기에 남아요(상담당 한 번)."
+                          onClick={() => void requestPhone()}
+                        >
+                          <Phone size={15} />
+                          {selected.kakao?.phoneRequestedAt ? "전화번호 요청함" : phoneBusy ? "요청 중…" : "전화번호 요청"}
+                        </button>
+                      )}
+                      <button type="button" className="is-danger" onClick={() => openOutcomePicker("close")}>
+                        <CheckCircle2 size={15} />
+                        상담 종료
+                      </button>
+                    </>
                   )}
                 </div>
               </header>
@@ -1249,7 +1341,7 @@ export function AdminLiveChat({
                           chat: selected.id,
                           ticket: selected.ticketNo,
                           talk: selected.source.via === TALK_VIA ? "1" : "",
-                          phone: selected.contactPhone,
+                          phone: selected.contactPhone || selected.kakao?.phone || "",
                           memberId: selected.memberId,
                         })}`}
                       >
@@ -1268,15 +1360,28 @@ export function AdminLiveChat({
                     </p>
                   ) : (
                     <div className={message.sender === "agent" ? "lc-msg is-mine" : "lc-msg"} key={message.seq}>
-                      <div className={message.delivery === "failed" ? "lc-bubble is-failed" : "lc-bubble"}>
+                      <div
+                        className={
+                          message.delivery === "failed" ? "lc-bubble is-failed" : message.deleted ? "lc-bubble is-deleted" : "lc-bubble"
+                        }
+                      >
                         <MessageText text={message.text} />
                       </div>
                       <time>{formatDateTime(message.createdAt)}</time>
-                      {message.delivery === "sending" && <span className="lc-delivery">톡톡으로 보내는 중…</span>}
-                      {message.delivery === "failed" && (
-                        <span className="lc-delivery is-failed">톡톡으로 보내지 못했어요 — 고객에게 가지 않았어요</span>
+                      {message.delivery === "sending" && (
+                        <span className="lc-delivery">{messengerName(selected.source.via)}으로 보내는 중…</span>
                       )}
-                      {message.partner && <span className="lc-delivery">톡톡 파트너센터에서 보냄</span>}
+                      {message.delivery === "failed" && (
+                        <span className="lc-delivery is-failed">
+                          {messengerName(selected.source.via)}으로 보내지 못했어요 — 고객에게 가지 않았어요
+                        </span>
+                      )}
+                      {message.partner && (
+                        <span className="lc-delivery">
+                          {selected.source.via === KAKAO_VIA ? "다른 곳(톡브릿지 등)에서 보냄" : "톡톡 파트너센터에서 보냄"}
+                        </span>
+                      )}
+                      {message.deleted && <span className="lc-delivery">보낸 뒤 지운 메시지 — 고객 화면에는 &apos;삭제된 메시지&apos;로 보여요</span>}
                     </div>
                   ),
                 )}
@@ -1296,13 +1401,10 @@ export function AdminLiveChat({
               {chatError && <p className="lc-error">{chatError}</p>}
 
               <div className="lc-quick" aria-label="빠른 문구">
-                {[
-                  ...DEFAULT_SNIPPETS.map((snippet) => ({ key: `default-${snippet.title}`, ...snippet })),
-                  ...snippets.map((snippet) => ({ key: snippet.id, title: snippet.title, body: snippet.body })),
-                ].map((snippet) => (
+                {shownSnippets.map((snippet) => (
                   <button
                     type="button"
-                    key={snippet.key}
+                    key={snippet.id || `default-${snippet.defaultKey}`}
                     title={snippet.body}
                     disabled={closed}
                     onClick={() => insertIntoReply(snippet.body)}
@@ -1326,7 +1428,9 @@ export function AdminLiveChat({
                       ? "종료된 상담입니다. 다시 열면 답변할 수 있어요."
                       : selected.source.via === TALK_VIA
                         ? "답변 입력 — 고객의 네이버 톡톡으로 바로 가요 (Enter 전송 · Shift+Enter 줄바꿈)"
-                        : "답변 입력 (Enter 전송 · Shift+Enter 줄바꿈)"
+                        : selected.source.via === KAKAO_VIA
+                          ? "답변 입력 — 고객의 카카오톡으로 바로 가요 (Enter 전송 · Shift+Enter 줄바꿈)"
+                          : "답변 입력 (Enter 전송 · Shift+Enter 줄바꿈)"
                   }
                 />
                 <button type="submit" disabled={closed || sending || !draft.trim()}>
@@ -1343,7 +1447,8 @@ export function AdminLiveChat({
             <AdminLiveChatAssist
               key={selected.id}
               chat={selected}
-              snippets={snippets}
+              snippets={shownSnippets}
+              snippetsEditable={snippetsLoaded}
               onSnippetsChange={setSnippets}
               onInsert={insertIntoReply}
               onOpenChat={selectChat}

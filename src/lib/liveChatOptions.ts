@@ -69,29 +69,56 @@ export function deleteReasonLabel(key: string) {
 }
 
 // 상담 도움 영역의 '기본 문구' — 정책과 상관없는 공통 문구만 둔다(정책 안내는 FAQ·AI 초안으로).
+// 처음 한 번만 '자주 쓰는 답변'(DB)에 넣고, 그 뒤로는 다른 문구처럼 고치고 지울 수 있다(api/admin/live-chat-snippets).
+// key 는 넣었는지 표시하는 이름 — 바꾸면 그 문구가 한 번 더 들어간다.
 export const DEFAULT_SNIPPETS = [
   {
+    key: "greeting",
     title: "첫 인사",
     body: "안녕하세요, 요기보 고객센터입니다. 문의 남겨 주셔서 감사합니다. 내용 확인 후 바로 안내드릴게요.",
   },
-  { title: "확인 중", body: "확인 중이에요. 잠시만 기다려 주세요." },
+  { key: "checking", title: "확인 중", body: "확인 중이에요. 잠시만 기다려 주세요." },
   {
+    key: "order-number",
     title: "주문번호 요청",
     body: "정확한 확인을 위해 주문번호를 남겨 주시겠어요? 주문번호를 모르시면 구매하신 곳과 주문하신 날짜를 알려 주세요.",
   },
   {
+    key: "hours",
     title: "운영시간 안내",
     body: `고객센터 운영시간은 ${LIVE_CHAT_HOURS_LABEL}입니다. 남겨 주신 내용은 운영시간에 순서대로 확인해 안내드릴게요.`,
   },
   {
+    key: "closing",
     title: "마무리",
     body: "더 궁금하신 점이 있으면 언제든 편하게 문의해 주세요. 오늘도 좋은 하루 보내세요. 감사합니다.",
   },
 ];
 
+// '자주 쓰는 답변' 순서 — 기본 문구는 위 순서대로 앞에, 직접 더한 문구는 최근에 고친 것부터.
+export function sortSnippets<T extends { defaultKey?: string; updatedAt?: string }>(items: T[]): T[] {
+  const rank = (item: T) => {
+    const index = DEFAULT_SNIPPETS.findIndex((snippet) => snippet.key === item.defaultKey);
+    return index < 0 ? DEFAULT_SNIPPETS.length : index;
+  };
+  return [...items].sort((a, b) => rank(a) - rank(b) || (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+}
+
 // 네이버 톡톡으로 들어온 상담의 유입 경로 key(lib/naverTalk) — 셀프가이드 경로와 달리 고객 화면 없이 톡톡으로 주고받는다.
 export const TALK_VIA = "talktalk";
-// 톡톡 고객이 보낸 사진은 상담 대화에 "[사진] <주소>" 글로 남기고, 어드민 화면이 사진으로 보여준다.
+// 카카오톡 채널 상담톡(톡브릿지 연결, lib/kakaoTalk)으로 들어온 상담 — 고객 화면 없이 카카오톡으로 주고받는다.
+// ("kakao" 는 카카오톡에서 셀프가이드 링크를 열고 들어온 셀프가이드 상담이라 다른 값이다.)
+export const KAKAO_VIA = "kakaochat";
+// 메신저(고객 화면 없이 그 메신저로 주고받는) 상담 — 답장은 그 메신저로 보내고, 접속 중 표시가 없다.
+export const MESSENGER_VIAS = [TALK_VIA, KAKAO_VIA] as const;
+export function isMessengerVia(via: string | undefined) {
+  return via === TALK_VIA || via === KAKAO_VIA;
+}
+// 화면 문구에 쓰는 메신저 이름("톡톡으로 보내는 중" 처럼)
+export function messengerName(via: string | undefined) {
+  return via === KAKAO_VIA ? "카카오톡" : "톡톡";
+}
+// 톡톡·카카오톡 고객이 보낸 사진은 상담 대화에 "[사진] <주소>" 글로 남기고, 어드민 화면이 사진으로 보여준다.
 export const TALK_PHOTO_PREFIX = "[사진] ";
 
 const VIA_LABELS: Record<string, string> = {
@@ -100,6 +127,7 @@ const VIA_LABELS: Record<string, string> = {
   phone: "전화 연결",
   naver: "네이버",
   [TALK_VIA]: "네이버 톡톡",
+  [KAKAO_VIA]: "카카오 상담톡",
   embed: "외부 사이트",
   web: "웹 직접 접속",
 };
