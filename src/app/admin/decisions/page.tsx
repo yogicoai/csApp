@@ -3,7 +3,6 @@ import {
   CircleHelp,
   ClipboardList,
   ExternalLink,
-  Lightbulb,
   ListChecks,
   type LucideIcon,
   Plug,
@@ -18,100 +17,16 @@ import type { ReactNode } from "react";
 import { isAuthed } from "@/lib/adminAuth";
 
 // 결정 사항 — 결정 전·보류·진행 중인 건을 폴더별로 자세히 설명한다(연결하면 어떻게 되는지, 비용, 한계, 순서, 아직 모르는 것). 회의 기록과 따로 둔다.
-// 근거: 톡브릿지 공식 문서·채널톡 안내·사방넷 공식 사용설명서·개발자센터 안내·사방넷 화면·CS팀 답변(2026-11-02~03 확인). 두 API 모두 실제로 호출해 보지는 않았다.
+// 근거: 톡브릿지 공식 문서·채널톡 안내·CS팀 답변(2026-11-02~03 확인), 개발환경 실제 시험(2026-11-26). 사방넷 폴더는 2026-11-26 사용자 요청으로 뺐다(결론: 도입 안 함, 게시판 관리의 사방넷 링크는 그대로).
 // 공개 저장소라 매출·문의 건수는 여기에 적지 않는다(몰별 숫자는 저장소 밖 보고서에 있다).
 
 // checking: 답을 기다리는 중인 폴더 — 탭에 N 표시
 const FOLDERS = [
-  { id: "sabangnet", label: "사방넷 API", checking: false },
   { id: "kakao", label: "카카오 상담", checking: true },
 ] as const;
 
 type FlowStep = { who: string; what: string };
 type Compare = { item: string; now: string; after: string };
-
-const SABANGNET_REASONS = [
-  "주문이 더 빨리 들어오지 않아요. 사방넷은 판매 즉시 쌓이는 것이 아니라 수집을 실행해야 쇼핑몰에서 가져와요. API 는 모아 둔 자료를 꺼내는 통로라, 붙여도 주문이 실시간으로 들어오지는 않을 것으로 봐요(상세 문서 확인 전 추정).",
-  "아끼는 시간이 크지 않아요. 물류 담당자의 아침 작업은 30분 안에 끝나요. 전부 자동화해도 평일 20일 기준 월 10시간 정도이고, 오류와 예외 건 확인은 남아요.",
-  "주문 규모에 비해 들이는 것이 커요. 주문이 많지 않은데, 매달 API 비용에 개발과 유지 관리까지 더해져요.",
-  "지금 방식이 불편하지 않을 수 있어요. 이미 손에 익은 작업이라 바꿔도 크게 편해지지 않을 수 있어요(담당자 확인 전).",
-  "CS 쪽도 사방넷 링크로 충분해요. 외부몰 문의는 많지 않고, API 로 답해도 쇼핑몰 반영 시차는 남을 것으로 봐요(추정).",
-];
-
-const SABANGNET_NOW: FlowStep[] = [
-  { who: "쇼핑몰", what: "자사몰·스마트스토어·외부몰에 주문과 문의가 쌓여요." },
-  { who: "사방넷", what: "수집을 실행할 때 쇼핑몰에서 가져와요. 판매되자마자 쌓이지 않아요. 스케줄러(자동 수집)를 쓰지 않아 주말분은 월요일에 몰려요." },
-  { who: "물류 담당자", what: "다음 날 아침 수집한 주문을 내려받아 이카운트 양식에 맞춰 올려요. 30분 안에 끝나요. 이때 온라인 매출을 알 수 있어요." },
-  { who: "CS팀", what: "자사몰·스마트스토어 문의는 [게시판 관리]에서 답하고, 그 외 몰은 사방넷이나 쇼핑몰에 들어가서 답해요." },
-];
-
-const SABANGNET_AFTER: FlowStep[] = [
-  { who: "사방넷", what: "주문·클레임·문의를 모으는 일은 지금처럼 사방넷이 해요. API 는 모아 둔 자료를 꺼내 오는 통로예요." },
-  { who: "onlineData 서버", what: "사방넷은 호출하는 서버의 IP 를 등록해야 해요. 이 프로그램의 서버는 IP 가 고정이 아니어서, IP 가 고정된 onlineData 서버를 거쳐요." },
-  { who: "이 프로그램", what: "외부몰 문의와 주문을 [게시판 관리]·[고객 조회]에 보여 줘요." },
-  { who: "CS팀", what: "그 화면에서 답을 적으면 사방넷으로 전달돼요." },
-  { who: "사방넷 → 쇼핑몰", what: "사방넷이 쇼핑몰로 답변을 보내요. 고객에게 보이기까지 시차가 있어요." },
-];
-
-const SABANGNET_USES: Array<Compare & { status: string }> = [
-  { item: "외부몰 문의 답변", now: "사방넷이나 쇼핑몰에 들어가서 답변", after: "[게시판 관리]에서 답변", status: "공개 안내에 문의 수집·답변 전송이 있음. 몰별 동작은 미확인" },
-  { item: "전화 중 외부몰 주문 찾기", now: "사방넷에서 따로 검색", after: "[고객 조회]에서 함께 검색", status: "전화번호로 찾을 수 있는지 미확인" },
-  { item: "외부몰 매출 합치기", now: "사방넷 통계를 따로 확인", after: "자사몰·스마트스토어와 합쳐서 확인", status: "사방넷 통계에 취소·반품이 0으로 나와 클레임 자료 확인 필요" },
-  { item: "이카운트 등록", now: "내려받아 사람이 업로드(30분 안에 끝남)", after: "자동 등록의 재료로 사용", status: "줄어드는 시간이 월 10시간 정도. API 없이 엑셀 변환으로도 시작할 수 있음" },
-  { item: "실시간 주문·매출", now: "수집한 뒤에야 보임", after: "더 빨라지지 않을 것으로 봄", status: "상세 문서 확인 전(추정). 스케줄러를 켜도 주문은 30분 간격, 00~06시 제외" },
-  { item: "주말 주문 공백", now: "월요일에 몰림", after: "API 만으로는 해결되지 않을 것으로 봄", status: "수집이 늦는 문제라 스케줄러가 해결책(추정)" },
-];
-
-const SABANGNET_PRICES = [
-  { plan: "싱글·레귤러·브론즈", api: "5만 원", scheduler: "3만 원", both: "8만 원" },
-  { plan: "실버·골드", api: "10만 원", scheduler: "5만 원", both: "15만 원" },
-  { plan: "스페셜1·2", api: "30만 원", scheduler: "5만 원", both: "35만 원" },
-  { plan: "스페셜3·4", api: "40만 원", scheduler: "5만 원", both: "45만 원" },
-  { plan: "플래티넘1·2", api: "50만 원", scheduler: "5만 원", both: "55만 원" },
-];
-
-const SABANGNET_LIMITS = [
-  "사방넷이 모은 문의만 볼 수 있어요. 미답변 문의만 수집되고, 재문의는 수집되지 않으며, 몰에 따라 일부 게시판은 빠져요.",
-  "답변이 쇼핑몰에 바로 반영되지 않아요. CS팀도 이 시차 때문에 쿠팡·오늘의집은 쇼핑몰에서 직접 답하고 있어요. API 로 답해도 같을 것으로 봐요(추정).",
-  "쇼핑몰로 보내지 못한 답변은 '답변저장' 상태로 남아요. 처리 상태를 되돌리거나 수집된 문의를 지울 수는 없어요.",
-  "자사몰·스마트스토어는 이미 직접 연결돼 있어요. 사방넷 쪽 자료와 겹치면 같은 문의에 두 번 답할 수 있어 빼고 보여 줘야 해요.",
-  "후기(리뷰) 수집·답글은 공개 자료에서 확인하지 못했어요.",
-  "자세한 API 문서는 결제한 뒤 초대받은 개발자만 볼 수 있어요. 결제 전에는 항목을 다 확인할 수 없어요.",
-  "주문 정보에는 고객 개인정보가 들어 있어요. [고객 조회]의 기본 가림과 조회 기록을 그대로 적용해야 해요.",
-];
-
-const SABANGNET_STEPS: FlowStep[] = [
-  { who: "결제 전 확인", what: "아래 '결제 전에 사방넷에 물어볼 것'을 기술 문의(api_sb@daou.co.kr)나 고객센터(1599-1311)로 확인해요." },
-  { who: "버전 확인", what: "사방넷 홈페이지 마이페이지 > 약정서관리에서 우리 버전과 요금을 봐요." },
-  { who: "신청", what: "약정서관리 > 부가서비스 신청 > API 3.0 자체개발 신규 연동을 신청해요." },
-  { who: "개발 준비", what: "마이페이지 > 연동관리에서 개발자 초대 메일을 보내고, Client ID·Secret 을 받아 onlineData 서버 IP 를 등록해요." },
-  { who: "시험", what: "고정된 답이 오는 시험 환경(샌드박스)에서 먼저 맞춰 봐요. 자체 개발용 '앱'은 심사 없이 실제 연결로 넘어가요." },
-  { who: "개발·반영", what: "onlineData 에 사방넷 연결을 만들고 이 프로그램 화면에 붙여요. 처음에는 조회만 켜고, 답변 보내기는 시험한 뒤에 켜요." },
-];
-
-const SABANGNET_QUESTIONS = [
-  "쇼핑몰별로 API 답변 등록이 되는지",
-  "1:1 문의와 쿠팡 고객센터 문의가 API 에 포함되는지",
-  "후기(리뷰)를 가져오거나 답글을 달 수 있는지",
-  "전화번호로 주문을 찾을 수 있는지",
-  "API 를 호출하면 쇼핑몰에서 새로 수집까지 하는지, 새 주문을 바로 알려 주는 기능이 있는지(스케줄러가 필요한지)",
-  "결제 전에 문서를 보거나 시험해 볼 수 있는지",
-];
-
-const SABANGNET_CHOICES: Compare[] = [
-  { item: "CS팀 업무", now: "[게시판 관리]의 링크로 사방넷에 들어가 확인", after: "외부몰 문의까지 이 프로그램에서 처리" },
-  { item: "월 비용", now: "추가 없음", after: "버전에 따라 5만~50만 원 추가" },
-  { item: "개발", now: "없음(링크만)", after: "onlineData 연결과 화면 개발 필요" },
-  { item: "답변 반영 시차", now: "쇼핑몰에서 직접 답하면 시차 없음", after: "사방넷을 거치는 시차 있음" },
-];
-
-const SABANGNET_RECHECK = [
-  "주문이 크게 늘어 아침 작업이 30분을 훌쩍 넘길 때",
-  "담당자 부재로 매출 입력이 자주 밀릴 때",
-  "전화 응대 중에 외부몰 주문까지 이 프로그램에서 찾아야 할 때",
-  "외부몰 매출을 자사몰·스마트스토어와 합쳐서 봐야 할 때",
-  "외부몰 문의가 지금보다 크게 늘어 사방넷을 오가는 일이 부담될 때",
-];
 
 // CS팀이 직접 하는 톡브릿지 신청 — 고객에게 영향이 없는 1~3단계와 연동 키 발급까지(2026-11-03 공식 문서 + 11-10 톡브릿지 답변 기준).
 const KAKAO_SIGNUP: FlowStep[] = [
@@ -290,12 +205,24 @@ const KAKAO_DEV_DONE = [
   "답장·종료 — 답이 고객 카카오톡으로 가요. [상담 종료]하면 카카오 상담도 끝나고, 고객 쪽에서 끝나거나 만료되면 이 화면 상담도 닫혀요.",
   "전화번호 요청 — 고객이 동의하면 카카오에 등록된 번호가 '전화' 칩에 남고, 고객 조회에서 그 번호로 찾아져요.",
   "그 밖 — 상담 연결 링크에 심은 값('들어온 곳'), 스팸 차단, AI 도우미 구매처 기준, 왼쪽 메뉴·알림.",
-  "가짜 톡브릿지(문서와 같은 응답)로 시험 81개·화면 시험 9개를 통과했어요. 실제 톡브릿지에는 아직 연결해 보지 않았어요.",
+  "가짜 톡브릿지(문서와 같은 응답)로 시험 81개·화면 시험 9개를 통과했고, 2026-11-26 개발환경에서 실제 톡브릿지로 받기·답장·종료까지 확인했어요(아래 '개발환경 시험 결과').",
+];
+
+// 2026-11-26 개발환경 실제 시험 — 개발 센터(console.talkbridge-dev.com) + 개발자용 채널 '(테스트)요기보연동' + 베타 서버(cscom-two)
+const KAKAO_DEV_RESULT = [
+  "성공 — 휴대폰 카카오톡에서 보낸 메시지가 [실시간 상담 → 카카오 상담톡]에 '대기'로 들어오고, 답장이 휴대폰에 도착하고, [상담 종료]하면 휴대폰 상담도 끝났어요.",
+  "채널 인증 — 채널 마스터(회사 카카오 계정) 번호로는 인증번호가 안 갔어요. 톡브릿지 안내대로 카카오톡을 실제로 쓰는 개인 계정을 채널 매니저로 추가하고 그 번호로 인증하니 됐어요. 운영 채널도 같은 방식으로 해요.",
+  "처음 수신 401 — Vercel 에 넣은 서명 검증 키가 톡브릿지 값과 달랐어요(서명 키는 연결한 Agent 키에서 만들어져요). 톡브릿지 화면에서 직접 복사해 다시 넣고 배포하니 수신 테스트 200 이 됐어요. 401 로 재시도가 끝난 메시지는 다시 오지 않아요.",
+  "헷갈렸던 점 — 운영 센터(console.talkbridge.io)와 개발 센터(console.talkbridge-dev.com) 화면이 같아요. 운영 센터는 개발자용 채널을 받지 않아요(\"개발자용 채널은 연결할 수 없습니다\"). 주소에 -dev 가 있는지 먼저 봐요.",
+  "톡브릿지 연동 안내(채널 추가 화면) — 채널 연동을 완료하는 순간 그 채널의 1:1 채팅을 못 써요(상담 활성화 때가 아니라 채널 추가 때). 연동 전 대화는 옮겨지지 않아요. 브랜드 설정의 '상담 중지'나 연동 해제로 되돌리면 관리자센터에서 다시 볼 수 있어요. 서비스 연결 전에 들어온 상담도 7일 안이면 받아요.",
+  "고객 안내 문구 — 상담 시작 때 \"채팅 내용은 (주)블룸에이아이에 저장됩니다\"가 나와요. 운영 전에 홈페이지 개인정보처리방침 '처리 위탁'에 이 회사를 넣어요.",
 ];
 
 const KAKAO_DEV_LEFT = [
-  "개발환경에서 실제 연결 시험 — 아래 순서",
-  "서버(cscom-two) 반영 — 이번 연결 코드는 아직 이 PC에만 있어요",
+  "개발환경에서 마저 확인 — [전화번호 요청], 사진 받기, 고객이 '!종료'로 먼저 끝내기, 여러 고객 동시(아래 '확인할 것')",
+  "시험 상담 삭제 — 시험 상담이 운영 DB 에 있어서 CS팀 목록에 보여요. [삭제 → 테스트]로 지워요",
+  "이 PC .env 의 서명 검증 키를 Vercel 과 같은 값으로 맞춰 두기, 톡브릿지에 해결됐다고 회신하기",
+  "운영 센터에 실수로 만든 '요기보 시험' 브랜드(채널 없음) 정리",
   "고객이 보낸 사진 보관 — 카카오 사진 주소는 열흘쯤 지나면 안 열려요. 드롭박스에 바로 저장할지 정해요",
   "챗봇으로 돌려보내기(봇 전환) — 'yogibo 리뷰 챗봇' 담당을 확인한 뒤",
   "운영 연결 — 'yogibo 고객센터' 채널, 아래 '운영으로 옮길 때'",
@@ -346,9 +273,13 @@ const KAKAO_DEV_TASKS: FlowStep[] = [
 ];
 
 const KAKAO_DEV_VALUES: Compare[] = [
-  { item: "KAKAO_TALKBRIDGE_BRAND", now: "Brand Key", after: "수신 신호의 brand 와 같은 값" },
+  { item: "KAKAO_TALKBRIDGE_BRAND", now: "Brand Key", after: "수신 신호의 brand(채널 키, '검색용아이디-6자리' 모양)와 같은 값" },
   { item: "KAKAO_TALKBRIDGE_AGENT_KEY", now: "Agent Key (blumnb-…)", after: "1개 브랜드 · 쓰기(BrandWrite). 원문은 발급할 때 한 번만 보여요" },
-  { item: "KAKAO_TALKBRIDGE_WEBHOOK_SECRET", now: "서명 검증 키 (whsec_…)", after: "연동 키를 새로 발급하면 바뀌어요 — 그때 다시 넣어요" },
+  {
+    item: "KAKAO_TALKBRIDGE_WEBHOOK_SECRET",
+    now: "서명 검증 키 (whsec_…)",
+    after: "톡브릿지 화면에서 직접 복사해요(따옴표·빈칸 없이). 어긋나면 수신 401. 연동 키를 새로 발급하면 바뀌어요",
+  },
   { item: "KAKAO_TALKBRIDGE_API_URL", now: "(직접 입력)", after: "개발환경은 https://api.talkbridge-dev.com — 운영으로 옮길 때 지워요" },
 ];
 
@@ -366,10 +297,11 @@ const KAKAO_DEV_CHECKS = [
 
 // 운영 연결 채널 — CS팀이 매일 상담하는 'yogibo 고객센터'(2026-11-11 전체 채팅목록으로 확인). 그래서 시험에는 쓰지 않는다.
 const KAKAO_DEV_TO_LIVE = [
-  "CS팀이 운영 톡브릿지(console.talkbridge.io)에 회사 공용 메일로 가입해요. 가입하면 Free(30일, 총 3건)가 바로 시작되니 개발환경 시험이 끝난 뒤에 해요.",
-  "브랜드를 만들고 'yogibo 고객센터' 채널을 등록·인증한 뒤 운영 연동 키를 발급해요(위 'CS팀 신청 가이드', 키는 개발 담당과 함께).",
-  "Vercel 환경변수 세 값을 운영 키로 바꾸고 KAKAO_TALKBRIDGE_API_URL 은 지운 뒤 다시 배포해요. 운영 센터에도 같은 받는 주소를 등록하고 연결 테스트를 해요. 개발환경 키를 운영에 쓰면 401 이에요(반대도 같아요).",
-  "전환하는 날: 1:1 채팅에서 진행 중인 상담을 마무리하고 필요한 대화를 내려받아요(채팅방 이름에 적어 둔 전화번호도 넘어오지 않아요). 결제 화면에서 회사 카드로 Pro 100 을 결제하고 상담을 활성화해요(켜면 1:1 채팅 메뉴가 사라져요).",
+  "운영 톡브릿지(console.talkbridge.io)는 회사 계정으로 이미 가입돼 있어요(2026-11-25, Free 30일·3건이 그날부터 셈). 계정 이관 기능이 없으니 이 회사 계정은 지우지 않고 유지해요.",
+  "전환 전: 필요한 지난 카카오 대화를 관리자센터에서 확인·내려받아요(채팅방 이름에 적어 둔 전화번호도 넘어오지 않아요). 'yogibo 고객센터' 채널에 카카오톡을 쓰는 직원 계정을 매니저로 추가해 두고, 개인정보처리방침 '처리 위탁'에 (주)블룸에이아이를 넣어요.",
+  "전환하는 날(고객이 적은 시간): 운영 센터에서 브랜드 → 'yogibo 고객센터' 채널 추가(매니저 번호로 인증). [채널 추가]를 누르는 순간 관리자센터 1:1 채팅이 멈춰요.",
+  "바로 이어서 운영 연동 키 발급 → Vercel 세 값을 운영 키로 바꾸고 KAKAO_TALKBRIDGE_API_URL 은 지운 뒤 다시 배포 → 운영 센터에 같은 받는 주소 등록 → 수신 테스트 200. 개발환경 키를 운영에 쓰면 401 이에요(반대도 같아요).",
+  "Pro 100 결제 → 상담 활성화 → 직원 휴대폰으로 받기·답장·종료를 바로 확인해요. 문제가 있으면 브랜드 설정의 '상담 중지'로 되돌려요. CS팀에는 카카오 상담을 이제 [실시간 상담]에서 본다고 미리 알려요.",
   "첫 주는 CS팀과 받기·답장·사진, 건수가 줄어드는 속도를 확인해요.",
   "'yogibo' 채널에도 고객 대화가 오면 같은 계정에 브랜드를 하나 더 만들어 함께 연결해요(요금제는 하나로 같이 써요). 프로그램도 두 채널을 받게 고쳐요.",
 ];
@@ -498,97 +430,6 @@ function Source({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-function SabangnetFolder() {
-  return (
-    <>
-      <Decision
-        state="보류"
-        planLabel="결론"
-        question="사방넷 API 를 결제해 이 프로그램에 연결할까요?"
-        plan="지금은 도입하지 않아요. 자사몰·스마트스토어는 직접 연결을 그대로 쓰고, 그 외 몰은 CS팀이 [게시판 관리]의 링크로 사방넷에 들어가 확인해요. 이카운트 입력은 물류 담당자가 지금 방식대로 해요."
-        cards={[
-          { label: "추가 비용", value: "월 5만 원부터", note: "사방넷 사용료와 별도, 우리 버전에 따라 달라짐" },
-          { label: "아끼는 시간", value: "월 10시간 정도", note: "아침 작업 30분 × 평일 20일, 확인 작업은 남음" },
-          { label: "풀리지 않는 것", value: "실시간 주문", note: "수집이 늦는 문제라 API 로 풀리지 않음(추정)" },
-        ]}
-      />
-      <Block icon={Lightbulb} title="왜 지금은 도입하지 않나요">
-        <Bullets items={SABANGNET_REASONS} />
-        <h3 className="dc-subhead">이럴 때 다시 검토해요</h3>
-        <Bullets items={SABANGNET_RECHECK} />
-        <p className="cost-note">주말이나 당일 주문 숫자가 필요해지면 API 보다 스케줄러를 먼저 봐요. 주문을 30분 간격으로 모으지만(00~06시 제외) 확정 매출은 여전히 이카운트예요. 켜기 전에 아침 작업에 영향이 있는지 물류 담당자와 확인해요.</p>
-      </Block>
-      <Block icon={Route} title="지금은 이렇게 돌아가요">
-        <Flow steps={SABANGNET_NOW} />
-      </Block>
-      <Block icon={ArrowLeftRight} title="연결하면 이렇게 바뀌어요">
-        <Flow steps={SABANGNET_AFTER} />
-      </Block>
-      <Block icon={Users} title="일별로 무엇이 달라지나요">
-        <table className="cost-table is-compare">
-          <thead>
-            <tr>
-              <th>일</th>
-              <th>지금</th>
-              <th>연결 후</th>
-              <th>확인 상태</th>
-            </tr>
-          </thead>
-          <tbody>
-            {SABANGNET_USES.map((row) => (
-              <tr key={row.item}>
-                <th>{row.item}</th>
-                <td>{row.now}</td>
-                <td>{row.after}</td>
-                <td>{row.status}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Block>
-      <Block icon={Receipt} title="비용 (월, 사방넷 사용료 별도)">
-        <table className="cost-table is-compare">
-          <thead>
-            <tr>
-              <th>사방넷 버전</th>
-              <th>API</th>
-              <th>스케줄러(자동 수집)</th>
-              <th>둘 다</th>
-            </tr>
-          </thead>
-          <tbody>
-            {SABANGNET_PRICES.map((row) => (
-              <tr key={row.plan}>
-                <th>{row.plan}</th>
-                <td className="cost-amount">{row.api}</td>
-                <td className="cost-amount">{row.scheduler}</td>
-                <td className="cost-amount">{row.both}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="cost-note">우리 버전은 아직 확인 전이에요. 사방넷 공식 안내 금액이고, 부가세 포함 여부는 신청 화면에서 확인해야 해요. 스케줄러는 API 와 별개로 결제할 수 있어요.</p>
-      </Block>
-      <Block icon={TriangleAlert} title="한계와 주의할 점">
-        <Bullets items={SABANGNET_LIMITS} />
-      </Block>
-      <Block icon={ListChecks} title="연결하기로 하면 이 순서로 해요">
-        <Flow steps={SABANGNET_STEPS} />
-      </Block>
-      <Block icon={CircleHelp} title="결제 전에 사방넷에 물어볼 것">
-        <Bullets items={SABANGNET_QUESTIONS} />
-      </Block>
-      <Block icon={Scale} title="두 선택 비교">
-        <CompareTable rows={SABANGNET_CHOICES} head={["항목", "연결 안 함(결론)", "연결함"]} />
-      </Block>
-      <p className="cost-source dc-source">
-        근거(2026-11-02~03 확인): <Source href="https://docs.sabangnet.co.kr:1975/sabangnet">사방넷 공식 사용설명서</Source> ·{" "}
-        <Source href="https://developer.sabangnet.co.kr">사방넷 개발자센터</Source> · 사방넷 관리 화면 · CS팀 답변. 상세 API 문서를 보지 못했고 실제 호출도 하지 않았어요. 몰별 건수와 매출은 온라인몰 연동 방안 보고(2026-11-03)에 있어요.
-      </p>
-    </>
-  );
-}
-
 function KakaoFolder() {
   return (
     <>
@@ -607,10 +448,12 @@ function KakaoFolder() {
         <p className="dc-checking">
           <span className="dc-new">N</span>
           <span>
-            <b>연결 기능 만들어 둠(2026-11-11, 이 PC)</b> — ① 개발자용 채널(개발환경)로 대화가 오가는지 확인한 뒤 ② 운영 톡브릿지에 &apos;yogibo
-            고객센터&apos;를 연결해요. &apos;yogibo 고객센터&apos;는 CS팀이 매일 쓰는 채널이라 시험에는 쓰지 않아요.
+            <b>개발환경 시험 성공(2026-11-26)</b> — 개발자용 채널로 받기·답장·종료가 실제 톡브릿지에서 됐어요. 남은 확인 몇 가지를 마치면 운영
+            톡브릿지에 &apos;yogibo 고객센터&apos;를 연결해요. &apos;yogibo 고객센터&apos;는 CS팀이 매일 쓰는 채널이라 시험에는 쓰지 않아요.
           </span>
         </p>
+        <h3 className="dc-subhead">개발환경 시험 결과 (2026-11-26)</h3>
+        <Bullets items={KAKAO_DEV_RESULT} />
         <h3 className="dc-subhead">만들어 둔 것</h3>
         <Bullets items={KAKAO_DEV_DONE} />
         <h3 className="dc-subhead">남은 작업</h3>
@@ -767,7 +610,7 @@ export default async function AdminDecisionsPage({ searchParams }: { searchParam
         ))}
       </nav>
 
-      {current === "kakao" ? <KakaoFolder /> : <SabangnetFolder />}
+      <KakaoFolder />
     </main>
   );
 }
