@@ -171,11 +171,21 @@ export function isImageFile(nameOrUrl: string) {
   return IMAGE_FILE.test(nameOrUrl.trim());
 }
 
-// 게시글의 사진 주소를 브라우저가 바로 여는 https 주소로 — '/web/upload/…' 같은 쇼핑몰 안 주소는 shopOrigin 을 붙인다.
-//   data: 주소(글에 통째로 박힌 사진)와 알 수 없는 모양은 버린다.
+// 본문에 통째로 박힌 사진(data: 주소) — cafe24 편집기에 사진을 붙여 넣으면 이렇게 들어온다(2026-11-27 실제 Q&A 2건 확인, 77~212KB).
+//   흔한 사진 형식만, 너무 큰 것은 빼서 목록 응답이 무거워지지 않게 한다.
+const DATA_IMAGE = /^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i;
+const MAX_DATA_IMAGE_LENGTH = 3_000_000; // 글자 수(사진 약 2MB)
+// cafe24 가 글에 스스로 넣는 아이콘·상품 사진(고객 사진이 아님 — 상품은 글 정보에 이름으로 따로 보인다).
+//   예: //img.echosting.cafe24.com/thumb/img_product_small.gif, https://yogibo.kr/web/product/medium/…(2026-11-27 실제 Q&A 확인)
+//   고객이 편집기로 올린 사진은 /web/upload/… 나 data: 로 와서 걸리지 않는다.
+const SHOP_SYSTEM_IMAGE = /^https:\/\/img\.echosting\.cafe24\.com\/|\/web\/product\//i;
+
+// 게시글의 사진 주소를 브라우저가 바로 여는 주소로 — '/web/upload/…' 같은 쇼핑몰 안 주소는 shopOrigin 을 붙이고 http 는 https 로.
+//   본문에 박힌 사진(data:image)은 그대로 두고, 그 밖의 data:·알 수 없는 모양은 버린다.
 export function absoluteImageUrl(src: string, shopOrigin: string) {
   const value = src.trim().replace(/&amp;/gi, "&");
-  if (!value || /^data:/i.test(value)) return "";
+  if (!value) return "";
+  if (/^data:/i.test(value)) return DATA_IMAGE.test(value) && value.length <= MAX_DATA_IMAGE_LENGTH ? value.replace(/\s+/g, "") : "";
   if (value.startsWith("//")) return `https:${value}`;
   if (/^https?:\/\//i.test(value)) return value.replace(/^http:\/\//i, "https://");
   if (!shopOrigin || /^[a-z][a-z0-9+.-]*:/i.test(value)) return "";
@@ -187,7 +197,7 @@ export function htmlImageUrls(html: string, shopOrigin: string) {
   const urls: string[] = [];
   for (const match of html.matchAll(/<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
     const url = absoluteImageUrl(match[1] ?? match[2] ?? match[3] ?? "", shopOrigin);
-    if (url && !urls.includes(url)) urls.push(url);
+    if (url && !SHOP_SYSTEM_IMAGE.test(url) && !urls.includes(url)) urls.push(url);
     if (urls.length >= MAX_POST_IMAGES) break;
   }
   return urls;

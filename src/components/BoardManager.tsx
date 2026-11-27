@@ -100,8 +100,24 @@ function readFrame(): AnswerFrame {
 const appendParagraph = (base: string, text: string) => (base.trim() ? `${base.trimEnd()}\n\n${text}` : text);
 
 // 고객이 올린 사진 한 장 — 누르면 새 창에서 크게. 사진을 못 불러오면(로그인 필요한 첨부 등) 파일 링크로 바꿔 보여 준다.
+//  본문에 박힌 사진(data: 주소)은 브라우저가 새 창으로 열지 않아서, 누르면 그 자리에서 크게 펼친다.
 function PostImage({ image }: { image: { name: string; url: string } }) {
   const [failed, setFailed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  if (image.url.startsWith("data:")) {
+    return (
+      <button
+        type="button"
+        className={expanded ? "bd-image is-expanded" : "bd-image"}
+        onClick={() => setExpanded((open) => !open)}
+        aria-expanded={expanded}
+        title={expanded ? "누르면 작게 돌아가요" : `${image.name} — 누르면 크게 보여요`}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element -- 글 본문에 들어 있는 사진을 그대로 보여 준다 */}
+        <img src={image.url} alt={image.name} />
+      </button>
+    );
+  }
   if (failed) {
     return (
       <a className="bd-image-link" href={image.url} target="_blank" rel="noreferrer">

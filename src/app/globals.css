@@ -8703,6 +8703,24 @@ a.lc-context-chip:hover {
   border-color: var(--primary);
 }
 
+/* 본문에 박힌 사진(누르면 그 자리에서 펼침) — 버튼 기본 모양을 지운다 */
+button.bd-image {
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.bd-image.is-expanded {
+  width: 100%;
+  height: auto;
+  cursor: zoom-out;
+}
+
+.bd-image.is-expanded img {
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
 .bd-chip svg {
   vertical-align: -1px;
 }
